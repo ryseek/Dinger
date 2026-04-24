@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="resources/dinger_icon.png" alt="Dinger app icon" width="120">
+  <img src="resources/overpromised_header.png" alt="Dinger app header">
 </p>
 
 # Dinger
