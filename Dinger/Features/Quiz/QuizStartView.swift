@@ -66,6 +66,14 @@ struct QuizRootView: View {
                         Label("Start", systemImage: "play.fill")
                     }
                     .disabled(vm.selectedDeck == nil)
+                } footer: {
+                    Text("""
+                    Open-source resources:
+                    TU Chemnitz / BEOLINGUS German-English dictionary (GPL v2 or later)
+                    Tatoeba German-English sentence pairs (CC BY 2.0 FR)
+                    Version \(appVersion)
+                    Made by ryseek
+                    """)
                 }
                 if let err = vm.error {
                     Section { Text(err).foregroundStyle(.red) }
@@ -84,5 +92,19 @@ struct QuizRootView: View {
         let pair = LanguagePair(source: vm.selectedDeck?.sourceLang ?? env.defaultPair.source,
                                 target: vm.selectedDeck?.targetLang ?? env.defaultPair.target)
         return mode.displayLabel(for: pair)
+    }
+
+    private var appVersion: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+
+        switch (version, build) {
+        case let (version?, build?) where !build.isEmpty:
+            return "\(version) (\(build))"
+        case let (version?, _):
+            return version
+        default:
+            return "1.0"
+        }
     }
 }
