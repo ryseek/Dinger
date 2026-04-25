@@ -1,7 +1,7 @@
 import Foundation
 
 // Tiny CLI wrapper around Importer. Usage:
-//   swift run dictimporter <input.txt> <output.sqlite> [--name NAME --version VERSION]
+//   swift run dictimporter <input.txt> <output.sqlite> [--name NAME --version VERSION --sentences PATH]
 //
 // Defaults point at the repo-relative paths so `swift run DictImporter`
 // with no arguments does the right thing when invoked from Tools/DictImporter.
@@ -11,6 +11,8 @@ struct CLI {
         let args = CommandLine.arguments.dropFirst()
         var input: String? = nil
         var output: String? = nil
+        var sentences: String? = nil
+        var shouldImportSentences = true
         var name = "TU-Chemnitz DE-EN"
         var version = "unknown"
 
@@ -19,8 +21,10 @@ struct CLI {
             switch arg {
             case "--name":    name = it.next() ?? name
             case "--version": version = it.next() ?? version
+            case "--sentences": sentences = it.next()
+            case "--no-sentences": shouldImportSentences = false
             case "-h", "--help":
-                print("usage: dictimporter <input.txt> <output.sqlite> [--name NAME --version VERSION]")
+                print("usage: dictimporter <input.txt> <output.sqlite> [--name NAME --version VERSION --sentences PATH]")
                 exit(0)
             default:
                 if input == nil { input = arg }
@@ -39,15 +43,25 @@ struct CLI {
             if let p = output { return URL(fileURLWithPath: p) }
             return repoRoot.appendingPathComponent("Dinger/Resources/de-en.sqlite")
         }()
+        let sentencePairsURL: URL? = {
+            guard shouldImportSentences else { return nil }
+            if let p = sentences { return URL(fileURLWithPath: p) }
+            let defaultURL = repoRoot.appendingPathComponent("resources/sentence_pairs_de-en.tsv")
+            return FileManager.default.fileExists(atPath: defaultURL.path) ? defaultURL : nil
+        }()
 
         FileHandle.standardError.write(Data("Importing \(inputURL.lastPathComponent) → \(outputURL.path)\n".utf8))
+        if let sentencePairsURL {
+            FileHandle.standardError.write(Data("Including examples from \(sentencePairsURL.lastPathComponent)\n".utf8))
+        }
 
         let parser = TuChemnitzParser()
         let importer = Importer(parser: parser,
                                 sourceURL: inputURL,
                                 outputURL: outputURL,
                                 dictName: name,
-                                dictVersion: version)
+                                dictVersion: version,
+                                sentencePairsURL: sentencePairsURL)
 
         let start = Date()
         do {
@@ -62,7 +76,9 @@ struct CLI {
               entries: \(stats.entries)
               senses:  \(stats.senses)
               terms:   \(stats.terms)
+              examples: \(stats.exampleSentences)
               skipped: \(stats.skipped)
+              example skipped: \(stats.exampleSkipped)
               output:  \(String(format: "%.1f", sizeMB)) MB
             """)
         } catch {

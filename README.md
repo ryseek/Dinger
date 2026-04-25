@@ -11,5 +11,6 @@ The generated SQLite dictionary database is intentionally excluded from git. The
 ## Credits
 
 - Dictionary data: TU Chemnitz / BEOLINGUS German-English dictionary, Copyright (c) Frank Richter, 1995-2026, GPL Version 2 or later.
+- Example sentences: [Tatoeba](https://tatoeba.org/) German-English sentence pairs, licensed under CC BY 2.0 FR.
 - Database layer: [GRDB.swift](https://github.com/groue/GRDB.swift), MIT License.
 - Built with SwiftUI, Swift Package Manager, and Xcode.

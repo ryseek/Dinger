@@ -5,6 +5,8 @@ public struct ImportStats: Sendable {
     public var entries: Int = 0
     public var senses: Int = 0
     public var terms: Int = 0
+    public var exampleSentences: Int = 0
+    public var exampleSkipped: Int = 0
     public var skipped: Int = 0
 }
 
@@ -15,17 +17,20 @@ public final class Importer {
     public let outputURL: URL
     public let dictName: String
     public let dictVersion: String
+    public let sentencePairsURL: URL?
 
     public init(parser: any DictionaryParser,
                 sourceURL: URL,
                 outputURL: URL,
                 dictName: String,
-                dictVersion: String) {
+                dictVersion: String,
+                sentencePairsURL: URL? = nil) {
         self.parser = parser
         self.sourceURL = sourceURL
         self.outputURL = outputURL
         self.dictName = dictName
         self.dictVersion = dictVersion
+        self.sentencePairsURL = sentencePairsURL
     }
 
     public func run(progress: ((Int, ImportStats) -> Void)? = nil) throws -> ImportStats {
@@ -118,10 +123,17 @@ public final class Importer {
             try db.execute(sql: "COMMIT")
         }
 
-        // Rebuild FTS from `term` (content-less shadow table is populated via rebuild).
+        if let sentencePairsURL {
+            try importSentencePairs(from: sentencePairsURL, into: queue, stats: &stats, progress: progress)
+        }
+
+        // Rebuild FTS from content tables.
         try queue.write { db in
             try db.execute(sql: """
                 INSERT INTO term_fts(term_fts) VALUES('rebuild');
+            """)
+            try db.execute(sql: """
+                INSERT INTO example_sentence_fts(example_sentence_fts) VALUES('rebuild');
             """)
             try db.execute(sql: "ANALYZE")
         }
@@ -136,5 +148,58 @@ public final class Importer {
         try vacuumQueue.close()
 
         return stats
+    }
+
+    private func importSentencePairs(from url: URL,
+                                     into queue: DatabaseQueue,
+                                     stats: inout ImportStats,
+                                     progress: ((Int, ImportStats) -> Void)?) throws {
+        let content = try String(contentsOf: url, encoding: .utf8)
+        var localStats = stats
+
+        try queue.writeWithoutTransaction { db in
+            try db.execute(sql: "BEGIN")
+            let insertExample = try db.makeStatement(sql: """
+                INSERT OR IGNORE INTO example_sentence
+                    (de_tatoeba_id, en_tatoeba_id, de_text, en_text, de_normalized, en_normalized)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """)
+
+            var insertionError: Error?
+            content.enumerateLines { line, stop in
+                guard insertionError == nil else {
+                    stop = true
+                    return
+                }
+                guard let pair = TatoebaSentenceParser.parse(line: line) else {
+                    localStats.exampleSkipped += 1
+                    return
+                }
+
+                do {
+                    try insertExample.execute(arguments: [
+                        pair.germanId,
+                        pair.englishId,
+                        pair.germanText,
+                        pair.englishText,
+                        TextNormalizer.normalize(pair.germanText),
+                        TextNormalizer.normalize(pair.englishText)
+                    ])
+                    localStats.exampleSentences += 1
+                } catch {
+                    insertionError = error
+                    stop = true
+                    return
+                }
+
+                if localStats.exampleSentences % 50_000 == 0 {
+                    progress?(localStats.entries, localStats)
+                }
+            }
+            if let insertionError { throw insertionError }
+
+            try db.execute(sql: "COMMIT")
+        }
+        stats = localStats
     }
 }

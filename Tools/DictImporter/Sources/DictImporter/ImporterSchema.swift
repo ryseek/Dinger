@@ -67,6 +67,25 @@ enum ImporterSchema {
                     tokenize='unicode61 remove_diacritics 2'
                 );
             """)
+            try db.execute(sql: """
+                CREATE TABLE example_sentence (
+                    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                    de_tatoeba_id  INTEGER NOT NULL,
+                    en_tatoeba_id  INTEGER NOT NULL,
+                    de_text        TEXT NOT NULL,
+                    en_text        TEXT NOT NULL,
+                    de_normalized  TEXT NOT NULL,
+                    en_normalized  TEXT NOT NULL,
+                    UNIQUE(de_tatoeba_id, en_tatoeba_id)
+                );
+            """)
+            try db.execute(sql: """
+                CREATE VIRTUAL TABLE example_sentence_fts USING fts5(
+                    de_normalized, en_normalized,
+                    content='example_sentence', content_rowid='id',
+                    tokenize='unicode61 remove_diacritics 2'
+                );
+            """)
         }
     }
 }

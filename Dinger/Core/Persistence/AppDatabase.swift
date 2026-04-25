@@ -12,6 +12,58 @@ public nonisolated final class AppDatabase: @unchecked Sendable {
 
     public let dbWriter: any DatabaseWriter
 
+    public nonisolated enum StartupProgress: Sendable, Equatable {
+        case locatingDatabase
+        case copyingSeedDatabase
+        case openingDatabase
+        case migratingSchema
+        case checkingExampleSentences
+        case copyingExampleSentences(copied: Int, total: Int)
+        case rebuildingExampleIndex
+        case ready
+
+        public var title: String {
+            switch self {
+            case .locatingDatabase:
+                return "Preparing dictionary..."
+            case .copyingSeedDatabase:
+                return "Installing dictionary..."
+            case .openingDatabase:
+                return "Opening dictionary..."
+            case .migratingSchema:
+                return "Updating database..."
+            case .checkingExampleSentences:
+                return "Checking example sentences..."
+            case .copyingExampleSentences:
+                return "Importing example sentences..."
+            case .rebuildingExampleIndex:
+                return "Indexing example sentences..."
+            case .ready:
+                return "Ready"
+            }
+        }
+
+        public var detail: String? {
+            switch self {
+            case .copyingExampleSentences(let copied, let total):
+                let formattedCopied = copied.formatted()
+                let formattedTotal = total.formatted()
+                return "\(formattedCopied) of \(formattedTotal)"
+            default:
+                return nil
+            }
+        }
+
+        public var fractionCompleted: Double? {
+            switch self {
+            case .copyingExampleSentences(let copied, let total) where total > 0:
+                return Double(copied) / Double(total)
+            default:
+                return nil
+            }
+        }
+    }
+
     public init(_ dbWriter: any DatabaseWriter) throws {
         self.dbWriter = dbWriter
         try Self.migrator.migrate(dbWriter)
@@ -41,7 +93,9 @@ public nonisolated final class AppDatabase: @unchecked Sendable {
 
     /// Copies the bundled seed DB into Application Support on first launch.
     /// Returns the URL of the writable on-device DB.
-    public static func ensureOnDeviceSeed(in bundle: Bundle = .main) throws -> URL {
+    public static func ensureOnDeviceSeed(in bundle: Bundle = .main,
+                                          progress: ((StartupProgress) -> Void)? = nil) throws -> URL {
+        progress?(.locatingDatabase)
         let dest = try onDeviceURL()
         let fm = FileManager.default
         if fm.fileExists(atPath: dest.path) { return dest }
@@ -49,19 +103,26 @@ public nonisolated final class AppDatabase: @unchecked Sendable {
         guard let seed = bundle.url(forResource: seedResourceName, withExtension: seedResourceExt) else {
             throw AppDatabaseError.seedMissing
         }
+        progress?(.copyingSeedDatabase)
         try fm.copyItem(at: seed, to: dest)
         return dest
     }
 
     /// Open the production database: seed-or-copy, then open pool + migrate.
-    public static func makeShared() throws -> AppDatabase {
-        let url = try ensureOnDeviceSeed()
+    public static func makeShared(progress: ((StartupProgress) -> Void)? = nil) throws -> AppDatabase {
+        let bundle = Bundle.main
+        let url = try ensureOnDeviceSeed(in: bundle, progress: progress)
         var config = Configuration()
         config.prepareDatabase { db in
             try db.execute(sql: "PRAGMA foreign_keys = ON")
         }
+        progress?(.openingDatabase)
         let pool = try DatabasePool(path: url.path, configuration: config)
-        return try AppDatabase(pool)
+        progress?(.migratingSchema)
+        let database = try AppDatabase(pool)
+        try database.copyBundledExamplesIfNeeded(from: bundle, progress: progress)
+        progress?(.ready)
+        return database
     }
 
     /// In-memory database used by previews / tests that don't need a seeded dict.
@@ -78,10 +139,6 @@ public nonisolated final class AppDatabase: @unchecked Sendable {
     /// identical schemas.
     public static var migrator: DatabaseMigrator {
         var migrator = DatabaseMigrator()
-
-        #if DEBUG
-        migrator.eraseDatabaseOnSchemaChange = true
-        #endif
 
         migrator.registerMigration("dictionary-schema-v1") { db in
             try db.execute(sql: """
@@ -142,6 +199,28 @@ public nonisolated final class AppDatabase: @unchecked Sendable {
                 CREATE VIRTUAL TABLE IF NOT EXISTS term_fts USING fts5(
                     headword, normalized,
                     content='term', content_rowid='id',
+                    tokenize='unicode61 remove_diacritics 2'
+                );
+            """)
+        }
+
+        migrator.registerMigration("dictionary-examples-v1") { db in
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS example_sentence (
+                    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                    de_tatoeba_id  INTEGER NOT NULL,
+                    en_tatoeba_id  INTEGER NOT NULL,
+                    de_text        TEXT NOT NULL,
+                    en_text        TEXT NOT NULL,
+                    de_normalized  TEXT NOT NULL,
+                    en_normalized  TEXT NOT NULL,
+                    UNIQUE(de_tatoeba_id, en_tatoeba_id)
+                );
+            """)
+            try db.execute(sql: """
+                CREATE VIRTUAL TABLE IF NOT EXISTS example_sentence_fts USING fts5(
+                    de_normalized, en_normalized,
+                    content='example_sentence', content_rowid='id',
                     tokenize='unicode61 remove_diacritics 2'
                 );
             """)
@@ -247,6 +326,59 @@ public nonisolated final class AppDatabase: @unchecked Sendable {
         }
 
         return migrator
+    }
+
+    // MARK: - Seed data upgrades
+
+    /// Existing installs already have a writable copy of an older seed DB.
+    /// Additive migrations create the example tables, then this copies only the
+    /// bundled example data into that existing DB without touching user decks.
+    public func copyBundledExamplesIfNeeded(from bundle: Bundle = .main,
+                                           progress: ((StartupProgress) -> Void)? = nil) throws {
+        guard let seedURL = bundle.url(forResource: Self.seedResourceName, withExtension: Self.seedResourceExt) else {
+            throw AppDatabaseError.seedMissing
+        }
+
+        try dbWriter.writeWithoutTransaction { db in
+            progress?(.checkingExampleSentences)
+            let existingCount = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM example_sentence") ?? 0
+            guard existingCount == 0 else { return }
+
+            try db.execute(sql: "ATTACH DATABASE ? AS bundled_seed", arguments: [seedURL.path])
+            defer {
+                try? db.execute(sql: "DETACH DATABASE bundled_seed")
+            }
+
+            let hasBundledExamples = try Int.fetchOne(db, sql: """
+                SELECT COUNT(*)
+                  FROM bundled_seed.sqlite_master
+                 WHERE type = 'table' AND name = 'example_sentence'
+                """) ?? 0
+            guard hasBundledExamples > 0 else { return }
+
+            let total = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM bundled_seed.example_sentence") ?? 0
+            guard total > 0 else { return }
+
+            let chunkSize = 20_000
+            var copied = 0
+            progress?(.copyingExampleSentences(copied: copied, total: total))
+            while copied < total {
+                try db.execute(sql: """
+                    INSERT OR IGNORE INTO main.example_sentence
+                        (de_tatoeba_id, en_tatoeba_id, de_text, en_text, de_normalized, en_normalized)
+                    SELECT de_tatoeba_id, en_tatoeba_id, de_text, en_text, de_normalized, en_normalized
+                      FROM bundled_seed.example_sentence
+                     ORDER BY id
+                     LIMIT ? OFFSET ?
+                    """, arguments: [chunkSize, copied])
+                copied = min(copied + chunkSize, total)
+                progress?(.copyingExampleSentences(copied: copied, total: total))
+            }
+            progress?(.rebuildingExampleIndex)
+            try db.execute(sql: """
+                INSERT INTO main.example_sentence_fts(example_sentence_fts) VALUES('rebuild')
+                """)
+        }
     }
 }
 

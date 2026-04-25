@@ -10,6 +10,8 @@ struct CardEditorView: View {
     @State private var repetitions: Int
     @State private var dueAt: Date?
     @State private var suspended: Bool
+    @State private var example: ExampleSentence?
+    @State private var exampleError: String?
     @State private var saveError: String?
     @Environment(\.dismiss) private var dismiss
 
@@ -31,6 +33,11 @@ struct CardEditorView: View {
             }
             Section("Back") {
                 Text(backSurface).font(.body)
+            }
+            if let example {
+                Section("Example") {
+                    CardExampleSentenceBlock(example: example, frontLanguageCode: frontLanguageCode)
+                }
             }
             Section("Meta") {
                 LabeledContent("Direction",
@@ -59,9 +66,33 @@ struct CardEditorView: View {
             if let err = saveError {
                 Section { Text(err).foregroundStyle(.red) }
             }
+            if let exampleError {
+                Section { Text(exampleError).font(.footnote).foregroundStyle(.red) }
+            }
         }
         .navigationTitle("Card")
         .navigationBarTitleDisplayMode(.inline)
+        .task(id: exampleTaskKey) {
+            await loadExample()
+        }
+    }
+
+    private var exampleTaskKey: String {
+        "\(card.id ?? 0)-\(card.frontTermId)-\(card.backTermId)-\(card.direction.rawValue)"
+    }
+
+    private var frontLanguageCode: String {
+        card.direction == .sourceToTarget ? env.defaultPair.source : env.defaultPair.target
+    }
+
+    private func loadExample() async {
+        do {
+            example = try await env.exampleSentenceService.bestExample(for: card)
+            exampleError = nil
+        } catch {
+            example = nil
+            exampleError = error.localizedDescription
+        }
     }
 
     private func invert() async {
@@ -93,5 +124,21 @@ struct CardEditorView: View {
         } catch {
             saveError = error.localizedDescription
         }
+    }
+}
+
+private struct CardExampleSentenceBlock: View {
+    let example: ExampleSentence
+    let frontLanguageCode: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(example.text(for: frontLanguageCode))
+                .font(.body)
+            Text(example.text(for: frontLanguageCode == "de" ? "en" : "de"))
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .textSelection(.enabled)
     }
 }

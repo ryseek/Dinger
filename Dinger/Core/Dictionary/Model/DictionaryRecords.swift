@@ -217,3 +217,27 @@ public nonisolated struct SenseHit: Identifiable, Hashable, Sendable {
         self.matchRank = matchRank
     }
 }
+
+public nonisolated struct ExampleSentence: Identifiable, Hashable, Sendable {
+    public let id: Int64
+    public let germanTatoebaId: Int64
+    public let englishTatoebaId: Int64
+    public let germanText: String
+    public let englishText: String
+
+    public init(id: Int64,
+                germanTatoebaId: Int64,
+                englishTatoebaId: Int64,
+                germanText: String,
+                englishText: String) {
+        self.id = id
+        self.germanTatoebaId = germanTatoebaId
+        self.englishTatoebaId = englishTatoebaId
+        self.germanText = germanText
+        self.englishText = englishText
+    }
+
+    public func text(for languageCode: String) -> String {
+        languageCode == "de" ? germanText : englishText
+    }
+}

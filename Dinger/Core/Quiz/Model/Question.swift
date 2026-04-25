@@ -14,6 +14,8 @@ public nonisolated struct Question: Identifiable, Hashable, Sendable {
     public let front: String           // prompt surface
     public let acceptableAnswers: [String]  // normalized
     public let displayAnswers: [String]     // as-shown on reveal
+    public let frontExample: String?
+    public let backExample: String?
     public let choices: [String]       // only for multipleChoice
     public let correctIndex: Int?      // only for multipleChoice
     public let cardDirection: CardDirection
@@ -25,6 +27,8 @@ public nonisolated struct Question: Identifiable, Hashable, Sendable {
                 front: String,
                 acceptableAnswers: [String],
                 displayAnswers: [String],
+                frontExample: String? = nil,
+                backExample: String? = nil,
                 choices: [String] = [],
                 correctIndex: Int? = nil,
                 cardDirection: CardDirection,
@@ -35,6 +39,8 @@ public nonisolated struct Question: Identifiable, Hashable, Sendable {
         self.front = front
         self.acceptableAnswers = acceptableAnswers
         self.displayAnswers = displayAnswers
+        self.frontExample = frontExample
+        self.backExample = backExample
         self.choices = choices
         self.correctIndex = correctIndex
         self.cardDirection = cardDirection

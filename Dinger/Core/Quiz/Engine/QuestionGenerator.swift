@@ -34,6 +34,8 @@ public nonisolated final class QuestionGenerator: @unchecked Sendable {
                 front: payload.frontSurface,
                 acceptableAnswers: normalizedAnswers,
                 displayAnswers: payload.backSurfaces,
+                frontExample: payload.frontExample,
+                backExample: payload.backExample,
                 cardDirection: effectiveDirection,
                 sourceLanguageCode: deck.sourceLang,
                 targetLanguageCode: deck.targetLang
@@ -46,6 +48,8 @@ public nonisolated final class QuestionGenerator: @unchecked Sendable {
                 front: payload.frontSurface,
                 acceptableAnswers: normalizedAnswers,
                 displayAnswers: payload.backSurfaces,
+                frontExample: payload.frontExample,
+                backExample: payload.backExample,
                 cardDirection: effectiveDirection,
                 sourceLanguageCode: deck.sourceLang,
                 targetLanguageCode: deck.targetLang
@@ -88,6 +92,8 @@ public nonisolated final class QuestionGenerator: @unchecked Sendable {
                 front: payload.frontSurface,
                 acceptableAnswers: normalizedAnswers,
                 displayAnswers: payload.backSurfaces,
+                frontExample: payload.frontExample,
+                backExample: payload.backExample,
                 choices: choicePool,
                 correctIndex: idx,
                 cardDirection: effectiveDirection,
@@ -148,6 +154,8 @@ public nonisolated final class QuestionGenerator: @unchecked Sendable {
     private struct Payload {
         let frontSurface: String
         let backSurfaces: [String]
+        let frontExample: String?
+        let backExample: String?
         let backLangCode: String
         let bucket: POSBucket
     }
@@ -201,10 +209,13 @@ public nonisolated final class QuestionGenerator: @unchecked Sendable {
                 if gender != nil, pos != nil { break }
             }
             let bucket = Self.classify(pos: pos, gender: gender)
+            let example = try ExampleSentenceService.fetchExamples(db: db, termId: frontTermId, limit: 1).first
 
             return Payload(
                 frontSurface: frontSurface,
                 backSurfaces: [backSurface],
+                frontExample: example?.text(for: frontLangCode),
+                backExample: example?.text(for: backLangCode),
                 backLangCode: backLangCode,
                 bucket: bucket
             )

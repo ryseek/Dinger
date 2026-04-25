@@ -75,6 +75,13 @@ struct QuizPlayView: View {
                 .font(.largeTitle)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
+            if let frontExample = q.frontExample {
+                Text(frontExample)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+            }
 
             switch q.kind {
             case .flashcard:
@@ -123,9 +130,22 @@ struct QuizPlayView: View {
     private func revealView(_ q: Question, inferredGrade: Grade?) -> some View {
         VStack(spacing: 16) {
             Text(q.front).font(.title2).foregroundStyle(.secondary)
+            if let frontExample = q.frontExample {
+                Text(frontExample)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
             Divider()
             ForEach(q.displayAnswers, id: \.self) { answer in
                 Text(answer).font(.title3)
+            }
+            if let backExample = q.backExample {
+                Text(backExample)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
             }
             if let grade = inferredGrade {
                 Text(grade == .again ? "Incorrect" : (grade == .hard ? "Close" : "Correct"))

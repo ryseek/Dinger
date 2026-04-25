@@ -8,6 +8,9 @@ struct EntryDetailView: View {
 
     @State private var selectedSourceTermId: Int64?
     @State private var selectedTargetTermId: Int64?
+    @State private var examples: [ExampleSentence] = []
+    @State private var examplesError: String?
+    @State private var isLoadingExamples = false
     @State private var saveMessage: String?
     @State private var saveError: String?
 
@@ -47,6 +50,19 @@ struct EntryDetailView: View {
                     }
                 }
             }
+            if isLoadingExamples || !examples.isEmpty || examplesError != nil {
+                Section("Examples") {
+                    if isLoadingExamples {
+                        ProgressView()
+                    }
+                    ForEach(examples) { example in
+                        ExampleSentenceBlock(example: example)
+                    }
+                    if let examplesError {
+                        Text(examplesError).font(.footnote).foregroundStyle(.red)
+                    }
+                }
+            }
             Section("Save to deck") {
                 Button {
                     Task { await save(direction: .sourceToTarget) }
@@ -74,6 +90,36 @@ struct EntryDetailView: View {
             guard recordHistory else { return }
             try? await env.historyService.recordOpenedSense(hit: hit, pair: env.defaultPair)
             await onHistoryRecorded?()
+        }
+        .task(id: exampleSelectionKey) {
+            await loadExamples()
+        }
+    }
+
+    private var exampleSelectionKey: String {
+        "\(selectedSourceTermBinding.wrappedValue)-\(selectedTargetTermBinding.wrappedValue)"
+    }
+
+    private func loadExamples() async {
+        isLoadingExamples = true
+        examplesError = nil
+        do {
+            var seen = Set<Int64>()
+            var matches: [ExampleSentence] = []
+            for termId in [selectedSourceTermBinding.wrappedValue, selectedTargetTermBinding.wrappedValue] where termId != 0 {
+                let termMatches = try await env.exampleSentenceService.examples(for: termId, limit: 3)
+                for example in termMatches where seen.insert(example.id).inserted {
+                    matches.append(example)
+                    if matches.count >= 3 { break }
+                }
+                if matches.count >= 3 { break }
+            }
+            examples = matches
+            isLoadingExamples = false
+        } catch {
+            examples = []
+            examplesError = error.localizedDescription
+            isLoadingExamples = false
         }
     }
 
@@ -163,5 +209,20 @@ private struct TermLine: View {
                 Text("{\(p)}").font(.caption).foregroundStyle(.tertiary)
             }
         }
+    }
+}
+
+private struct ExampleSentenceBlock: View {
+    let example: ExampleSentence
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(example.germanText)
+                .font(.body)
+            Text(example.englishText)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .textSelection(.enabled)
     }
 }

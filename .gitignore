@@ -19,3 +19,5 @@ xcuserdata/
 /resources/*.txt
 /resources/*.txt.*
 !/resources/*.txt*.gz
+/resources/*.tsv
+!/resources/*.tsv.gz
