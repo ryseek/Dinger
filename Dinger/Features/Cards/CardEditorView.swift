@@ -5,8 +5,8 @@ struct CardEditorView: View {
     let onChanged: () -> Void
 
     @State private var card: Card
-    @State private var frontSurface: String
-    @State private var backSurface: String
+    @State private var frontSurfaces: [String]
+    @State private var backSurfaces: [String]
     @State private var repetitions: Int
     @State private var dueAt: Date?
     @State private var suspended: Bool
@@ -19,8 +19,8 @@ struct CardEditorView: View {
         self.env = env
         self.onChanged = onChanged
         _card         = State(initialValue: row.card)
-        _frontSurface = State(initialValue: row.frontSurface)
-        _backSurface  = State(initialValue: row.backSurface)
+        _frontSurfaces = State(initialValue: row.frontSurfaces)
+        _backSurfaces  = State(initialValue: row.backSurfaces)
         _repetitions  = State(initialValue: row.repetitions)
         _dueAt        = State(initialValue: row.dueAt)
         _suspended    = State(initialValue: row.suspended)
@@ -29,10 +29,14 @@ struct CardEditorView: View {
     var body: some View {
         Form {
             Section("Front") {
-                Text(frontSurface).font(.title3)
+                ForEach(Array(frontSurfaces.enumerated()), id: \.offset) { _, surface in
+                    Text(surface).font(.title3)
+                }
             }
             Section("Back") {
-                Text(backSurface).font(.body)
+                ForEach(Array(backSurfaces.enumerated()), id: \.offset) { _, surface in
+                    Text(surface).font(.body)
+                }
             }
             if let example {
                 Section("Example") {
@@ -78,7 +82,7 @@ struct CardEditorView: View {
     }
 
     private var exampleTaskKey: String {
-        "\(card.id ?? 0)-\(card.frontTermId)-\(card.backTermId)-\(card.direction.rawValue)"
+        "\(card.id ?? 0)-\(card.frontTermIdsRaw)-\(card.backTermIdsRaw)-\(card.direction.rawValue)"
     }
 
     private var frontLanguageCode: String {
@@ -98,7 +102,7 @@ struct CardEditorView: View {
     private func invert() async {
         do {
             let updated = try await env.cardService.invert(card: card)
-            swap(&frontSurface, &backSurface)
+            swap(&frontSurfaces, &backSurfaces)
             card = updated
             saveError = nil
             onChanged()

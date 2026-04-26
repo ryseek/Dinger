@@ -23,6 +23,8 @@ public nonisolated struct Card: Codable, Identifiable, FetchableRecord, MutableP
     public var senseId: Int64
     public var frontTermId: Int64
     public var backTermId: Int64
+    public var frontTermIdsRaw: String
+    public var backTermIdsRaw: String
     public var direction: CardDirection
     public var createdAt: Date
     public var suspended: Bool
@@ -35,6 +37,8 @@ public nonisolated struct Card: Codable, Identifiable, FetchableRecord, MutableP
         case senseId = "sense_id"
         case frontTermId = "front_term_id"
         case backTermId = "back_term_id"
+        case frontTermIdsRaw = "front_term_ids"
+        case backTermIdsRaw = "back_term_ids"
         case direction
         case createdAt = "created_at"
         case suspended
@@ -45,6 +49,8 @@ public nonisolated struct Card: Codable, Identifiable, FetchableRecord, MutableP
                 senseId: Int64,
                 frontTermId: Int64,
                 backTermId: Int64,
+                frontTermIds: [Int64] = [],
+                backTermIds: [Int64] = [],
                 direction: CardDirection,
                 createdAt: Date = Date(),
                 suspended: Bool = false) {
@@ -53,6 +59,8 @@ public nonisolated struct Card: Codable, Identifiable, FetchableRecord, MutableP
         self.senseId = senseId
         self.frontTermId = frontTermId
         self.backTermId = backTermId
+        self.frontTermIdsRaw = Self.encodeTermIds(frontTermIds.isEmpty ? [frontTermId] : frontTermIds)
+        self.backTermIdsRaw = Self.encodeTermIds(backTermIds.isEmpty ? [backTermId] : backTermIds)
         self.direction = direction
         self.createdAt = createdAt
         self.suspended = suspended
@@ -60,6 +68,27 @@ public nonisolated struct Card: Codable, Identifiable, FetchableRecord, MutableP
 
     public mutating func didInsert(_ inserted: InsertionSuccess) {
         id = inserted.rowID
+    }
+
+    public var frontTermIds: [Int64] {
+        let decoded = Self.decodeTermIds(frontTermIdsRaw)
+        return decoded.isEmpty ? [frontTermId] : decoded
+    }
+
+    public var backTermIds: [Int64] {
+        let decoded = Self.decodeTermIds(backTermIdsRaw)
+        return decoded.isEmpty ? [backTermId] : decoded
+    }
+
+    public static func encodeTermIds(_ ids: [Int64]) -> String {
+        var seen = Set<Int64>()
+        return ids.filter { seen.insert($0).inserted }
+            .map(String.init)
+            .joined(separator: ",")
+    }
+
+    public static func decodeTermIds(_ raw: String) -> [Int64] {
+        raw.split(separator: ",").compactMap { Int64($0) }
     }
 }
 

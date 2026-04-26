@@ -6,8 +6,8 @@ struct EntryDetailView: View {
     let recordHistory: Bool
     let onHistoryRecorded: (() async -> Void)?
 
-    @State private var selectedSourceTermId: Int64?
-    @State private var selectedTargetTermId: Int64?
+    @State private var selectedSourceTermIds: Set<Int64> = []
+    @State private var selectedTargetTermIds: Set<Int64> = []
     @State private var examples: [ExampleSentence] = []
     @State private var examplesError: String?
     @State private var isLoadingExamples = false
@@ -29,14 +29,14 @@ struct EntryDetailView: View {
             Section("Source (\(env.defaultPair.source.uppercased()))") {
                 TermSelectionList(
                     terms: hit.sourceTerms,
-                    selectedTermId: selectedSourceTermBinding,
+                    selectedTermIds: selectedSourceTermBinding,
                     selectableLabel: "source variant"
                 )
             }
             Section("Target (\(env.defaultPair.target.uppercased()))") {
                 TermSelectionList(
                     terms: hit.targetTerms,
-                    selectedTermId: selectedTargetTermBinding,
+                    selectedTermIds: selectedTargetTermBinding,
                     selectableLabel: "translation variant"
                 )
             }
@@ -97,7 +97,7 @@ struct EntryDetailView: View {
     }
 
     private var exampleSelectionKey: String {
-        "\(selectedSourceTermBinding.wrappedValue)-\(selectedTargetTermBinding.wrappedValue)"
+        "\(selectedSourceTermIdsArray)-\(selectedTargetTermIdsArray)"
     }
 
     private func loadExamples() async {
@@ -106,7 +106,7 @@ struct EntryDetailView: View {
         do {
             var seen = Set<Int64>()
             var matches: [ExampleSentence] = []
-            for termId in [selectedSourceTermBinding.wrappedValue, selectedTargetTermBinding.wrappedValue] where termId != 0 {
+            for termId in selectedSourceTermIdsArray + selectedTargetTermIdsArray where termId != 0 {
                 let termMatches = try await env.exampleSentenceService.examples(for: termId, limit: 3)
                 for example in termMatches where seen.insert(example.id).inserted {
                     matches.append(example)
@@ -132,8 +132,8 @@ struct EntryDetailView: View {
                 from: hit,
                 direction: direction,
                 deck: deck,
-                selectedSourceTermId: selectedSourceTermBinding.wrappedValue,
-                selectedTargetTermId: selectedTargetTermBinding.wrappedValue
+                selectedSourceTermIds: selectedSourceTermIdsArray,
+                selectedTargetTermIds: selectedTargetTermIdsArray
             )
             if result.isNew {
                 saveMessage = "Added to \(deck.name)."
@@ -147,26 +147,38 @@ struct EntryDetailView: View {
         }
     }
 
-    private var selectedSourceTermBinding: Binding<Int64> {
+    private var selectedSourceTermIdsArray: [Int64] {
+        orderedSelectedIds(from: hit.sourceTerms, selectedIds: selectedSourceTermBinding.wrappedValue)
+    }
+
+    private var selectedTargetTermIdsArray: [Int64] {
+        orderedSelectedIds(from: hit.targetTerms, selectedIds: selectedTargetTermBinding.wrappedValue)
+    }
+
+    private func orderedSelectedIds(from terms: [TermDisplay], selectedIds: Set<Int64>) -> [Int64] {
+        terms.map(\.termId).filter { selectedIds.contains($0) }
+    }
+
+    private var selectedSourceTermBinding: Binding<Set<Int64>> {
         Binding {
-            selectedSourceTermId ?? hit.sourceTerms.first?.termId ?? 0
+            selectedSourceTermIds.isEmpty ? Set(hit.sourceTerms.prefix(1).map(\.termId)) : selectedSourceTermIds
         } set: { newValue in
-            selectedSourceTermId = newValue
+            selectedSourceTermIds = newValue
         }
     }
 
-    private var selectedTargetTermBinding: Binding<Int64> {
+    private var selectedTargetTermBinding: Binding<Set<Int64>> {
         Binding {
-            selectedTargetTermId ?? hit.targetTerms.first?.termId ?? 0
+            selectedTargetTermIds.isEmpty ? Set(hit.targetTerms.prefix(1).map(\.termId)) : selectedTargetTermIds
         } set: { newValue in
-            selectedTargetTermId = newValue
+            selectedTargetTermIds = newValue
         }
     }
 }
 
 private struct TermSelectionList: View {
     let terms: [TermDisplay]
-    @Binding var selectedTermId: Int64
+    @Binding var selectedTermIds: Set<Int64>
     let selectableLabel: String
 
     var body: some View {
@@ -177,12 +189,12 @@ private struct TermSelectionList: View {
         } else {
             ForEach(terms, id: \.termId) { term in
                 Button {
-                    selectedTermId = term.termId
+                    toggle(term.termId)
                 } label: {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         TermLine(term: term)
                         Spacer()
-                        if selectedTermId == term.termId {
+                        if selectedTermIds.contains(term.termId) {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundStyle(.tint)
                                 .accessibilityLabel("Selected \(selectableLabel)")
@@ -191,6 +203,15 @@ private struct TermSelectionList: View {
                 }
                 .buttonStyle(.plain)
             }
+        }
+    }
+
+    private func toggle(_ termId: Int64) {
+        if selectedTermIds.contains(termId) {
+            guard selectedTermIds.count > 1 else { return }
+            selectedTermIds.remove(termId)
+        } else {
+            selectedTermIds.insert(termId)
         }
     }
 }

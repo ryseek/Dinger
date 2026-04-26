@@ -80,14 +80,16 @@ public nonisolated final class CardService: @unchecked Sendable {
                            direction: CardDirection,
                            deck: Deck,
                            selectedSourceTermId: Int64? = nil,
-                           selectedTargetTermId: Int64? = nil) async throws -> CardCreationResult {
+                           selectedTargetTermId: Int64? = nil,
+                           selectedSourceTermIds: [Int64]? = nil,
+                           selectedTargetTermIds: [Int64]? = nil) async throws -> CardCreationResult {
         guard let deckId = deck.id else { throw CardServiceError.senseNotFound }
 
         let (front, back) = try Self.pickFrontBack(
             hit: hit,
             direction: direction,
-            selectedSourceTermId: selectedSourceTermId,
-            selectedTargetTermId: selectedTargetTermId
+            selectedSourceTermIds: selectedSourceTermIds ?? selectedSourceTermId.map { [$0] },
+            selectedTargetTermIds: selectedTargetTermIds ?? selectedTargetTermId.map { [$0] }
         )
 
         return try await database.dbWriter.write { db in
@@ -96,24 +98,37 @@ public nonisolated final class CardService: @unchecked Sendable {
                 .filter(Column("sense_id") == hit.senseId)
                 .filter(Column("direction") == direction.rawValue)
                 .fetchOne(db) {
-                guard existing.frontTermId != front.termId || existing.backTermId != back.termId else {
+                let frontIdsRaw = Card.encodeTermIds(front.map(\.termId))
+                let backIdsRaw = Card.encodeTermIds(back.map(\.termId))
+                guard existing.frontTermId != front[0].termId ||
+                        existing.backTermId != back[0].termId ||
+                        existing.frontTermIdsRaw != frontIdsRaw ||
+                        existing.backTermIdsRaw != backIdsRaw else {
                     return CardCreationResult(card: existing, isNew: false, didUpdate: false)
                 }
                 try db.execute(sql: """
-                    UPDATE card SET front_term_id = ?, back_term_id = ?
+                    UPDATE card
+                       SET front_term_id = ?,
+                           back_term_id = ?,
+                           front_term_ids = ?,
+                           back_term_ids = ?
                      WHERE id = ?
-                    """, arguments: [front.termId, back.termId, existing.id])
+                    """, arguments: [front[0].termId, back[0].termId, frontIdsRaw, backIdsRaw, existing.id])
                 var updated = existing
-                updated.frontTermId = front.termId
-                updated.backTermId = back.termId
+                updated.frontTermId = front[0].termId
+                updated.backTermId = back[0].termId
+                updated.frontTermIdsRaw = frontIdsRaw
+                updated.backTermIdsRaw = backIdsRaw
                 return CardCreationResult(card: updated, isNew: false, didUpdate: true)
             }
 
             var card = Card(
                 deckId: deckId,
                 senseId: hit.senseId,
-                frontTermId: front.termId,
-                backTermId: back.termId,
+                frontTermId: front[0].termId,
+                backTermId: back[0].termId,
+                frontTermIds: front.map(\.termId),
+                backTermIds: back.map(\.termId),
                 direction: direction
             )
             try card.insert(db)
@@ -127,16 +142,16 @@ public nonisolated final class CardService: @unchecked Sendable {
 
     private static func pickFrontBack(hit: SenseHit,
                                       direction: CardDirection,
-                                      selectedSourceTermId: Int64?,
-                                      selectedTargetTermId: Int64?) throws -> (TermDisplay, TermDisplay) {
+                                      selectedSourceTermIds: [Int64]?,
+                                      selectedTargetTermIds: [Int64]?) throws -> ([TermDisplay], [TermDisplay]) {
         let source = try pickTerm(
             from: hit.sourceTerms,
-            selectedTermId: selectedSourceTermId,
+            selectedTermIds: selectedSourceTermIds,
             missingError: .noFrontTerm
         )
         let target = try pickTerm(
             from: hit.targetTerms,
-            selectedTermId: selectedTargetTermId,
+            selectedTermIds: selectedTargetTermIds,
             missingError: .noBackTerm
         )
         switch direction {
@@ -148,14 +163,15 @@ public nonisolated final class CardService: @unchecked Sendable {
     }
 
     private static func pickTerm(from terms: [TermDisplay],
-                                 selectedTermId: Int64?,
-                                 missingError: CardServiceError) throws -> TermDisplay {
+                                 selectedTermIds: [Int64]?,
+                                 missingError: CardServiceError) throws -> [TermDisplay] {
         guard !terms.isEmpty else { throw missingError }
-        guard let selectedTermId else { return terms[0] }
-        guard let term = terms.first(where: { $0.termId == selectedTermId }) else {
+        guard let selectedTermIds, !selectedTermIds.isEmpty else { return [terms[0]] }
+        let selected = terms.filter { selectedTermIds.contains($0.termId) }
+        guard selected.count == Set(selectedTermIds).count else {
             throw CardServiceError.selectedTermNotFound
         }
-        return term
+        return selected
     }
 
     public func cards(in deck: Deck) async throws -> [Card] {
@@ -200,13 +216,27 @@ public nonisolated final class CardService: @unchecked Sendable {
             if clash != nil { throw CardServiceError.duplicateAfterInvert }
 
             try db.execute(sql: """
-                UPDATE card SET front_term_id = ?, back_term_id = ?, direction = ?
+                UPDATE card
+                   SET front_term_id = ?,
+                       back_term_id = ?,
+                       front_term_ids = ?,
+                       back_term_ids = ?,
+                       direction = ?
                  WHERE id = ?
-                """, arguments: [card.backTermId, card.frontTermId, newDirection.rawValue, cardId])
+                """, arguments: [
+                    card.backTermId,
+                    card.frontTermId,
+                    card.backTermIdsRaw,
+                    card.frontTermIdsRaw,
+                    newDirection.rawValue,
+                    cardId
+                ])
 
             var updated = card
             updated.frontTermId = card.backTermId
             updated.backTermId  = card.frontTermId
+            updated.frontTermIdsRaw = card.backTermIdsRaw
+            updated.backTermIdsRaw = card.frontTermIdsRaw
             updated.direction   = newDirection
             return updated
         }

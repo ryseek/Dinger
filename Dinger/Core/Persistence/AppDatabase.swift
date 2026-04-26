@@ -325,6 +325,21 @@ public nonisolated final class AppDatabase: @unchecked Sendable {
             """)
         }
 
+        migrator.registerMigration("card-selected-terms-v1") { db in
+            try db.execute(sql: """
+                ALTER TABLE card ADD COLUMN front_term_ids TEXT NOT NULL DEFAULT ''
+                """)
+            try db.execute(sql: """
+                ALTER TABLE card ADD COLUMN back_term_ids TEXT NOT NULL DEFAULT ''
+                """)
+            try db.execute(sql: """
+                UPDATE card
+                   SET front_term_ids = CAST(front_term_id AS TEXT),
+                       back_term_ids = CAST(back_term_id AS TEXT)
+                 WHERE front_term_ids = '' OR back_term_ids = ''
+                """)
+        }
+
         return migrator
     }
 

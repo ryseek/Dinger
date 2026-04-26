@@ -58,7 +58,7 @@ struct DeckDetailView: View {
     private func cardRow(_ row: CardRow) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline) {
-                Text(row.frontSurface).font(.headline)
+                Text(row.frontSurfaces.joined(separator: " / ")).font(.headline)
                 if row.suspended {
                     Image(systemName: "pause.circle").foregroundStyle(.orange)
                 }
@@ -66,7 +66,7 @@ struct DeckDetailView: View {
                 Text(row.card.direction == .sourceToTarget ? "S→T" : "T→S")
                     .font(.caption2).foregroundStyle(.secondary)
             }
-            Text(row.backSurface)
+            Text(row.backSurfaces.joined(separator: " / "))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)

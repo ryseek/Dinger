@@ -32,6 +32,7 @@ public nonisolated final class QuestionGenerator: @unchecked Sendable {
                 id: card.id ?? 0,
                 kind: .flashcard,
                 front: payload.frontSurface,
+                displayFronts: payload.frontSurfaces,
                 acceptableAnswers: normalizedAnswers,
                 displayAnswers: payload.backSurfaces,
                 frontExample: payload.frontExample,
@@ -46,6 +47,7 @@ public nonisolated final class QuestionGenerator: @unchecked Sendable {
                 id: card.id ?? 0,
                 kind: .typing,
                 front: payload.frontSurface,
+                displayFronts: payload.frontSurfaces,
                 acceptableAnswers: normalizedAnswers,
                 displayAnswers: payload.backSurfaces,
                 frontExample: payload.frontExample,
@@ -67,10 +69,12 @@ public nonisolated final class QuestionGenerator: @unchecked Sendable {
                 limit: distractorCount * 4
             )
 
-            let correctCleaned = cleanForChoice(payload.backSurfaces.first ?? "?")
-            let correctKey = TextNormalizer.normalize(correctCleaned)
+            let correctOptions = payload.backSurfaces.map { cleanForChoice($0) }
+                .filter { !$0.isEmpty }
+            let correctCleaned = correctOptions.randomElement() ?? "?"
+            let correctKeys = Set(correctOptions.map { TextNormalizer.normalize($0) })
 
-            var seenKeys: Set<String> = [correctKey]
+            var seenKeys = correctKeys
             var cleanedDistractors: [String] = []
             for raw in rawDistractors {
                 let cleaned = cleanForChoice(raw)
@@ -90,6 +94,7 @@ public nonisolated final class QuestionGenerator: @unchecked Sendable {
                 id: card.id ?? 0,
                 kind: .multipleChoice,
                 front: payload.frontSurface,
+                displayFronts: payload.frontSurfaces,
                 acceptableAnswers: normalizedAnswers,
                 displayAnswers: payload.backSurfaces,
                 frontExample: payload.frontExample,
@@ -153,11 +158,17 @@ public nonisolated final class QuestionGenerator: @unchecked Sendable {
 
     private struct Payload {
         let frontSurface: String
+        let frontSurfaces: [String]
         let backSurfaces: [String]
         let frontExample: String?
         let backExample: String?
         let backLangCode: String
         let bucket: POSBucket
+    }
+
+    private struct TermSurface {
+        let termId: Int64
+        let surface: String
     }
 
     private func fetchPayload(for card: Card, direction: CardDirection) async throws -> Payload {
@@ -173,27 +184,19 @@ public nonisolated final class QuestionGenerator: @unchecked Sendable {
         }
 
         return try await reader.read { db in
-            let frontTermId: Int64
-            let backTermId: Int64
+            let frontTermIds: [Int64]
+            let backTermIds: [Int64]
             if direction == card.direction {
-                frontTermId = card.frontTermId
-                backTermId = card.backTermId
+                frontTermIds = card.frontTermIds
+                backTermIds = card.backTermIds
             } else {
-                frontTermId = card.backTermId
-                backTermId = card.frontTermId
+                frontTermIds = card.backTermIds
+                backTermIds = card.frontTermIds
             }
 
-            let frontSurface = try String.fetchOne(db, sql: """
-                SELECT t.surface FROM term t
-                JOIN language l ON l.id = t.language_id
-                WHERE t.id = ? AND l.code = ?
-                """, arguments: [frontTermId, frontLangCode]) ?? "?"
-
-            let backSurface = try String.fetchOne(db, sql: """
-                SELECT t.surface FROM term t
-                JOIN language l ON l.id = t.language_id
-                WHERE t.id = ? AND l.code = ?
-                """, arguments: [backTermId, backLangCode]) ?? "?"
+            let frontTerms = try Self.fetchTermSurfaces(db: db, termIds: frontTermIds, languageCode: frontLangCode)
+            let backTerms = try Self.fetchTermSurfaces(db: db, termIds: backTermIds, languageCode: backLangCode)
+            let promptTerm = frontTerms.randomElement()
 
             // Determine POS/gender from any term on the sense, preferring
             // one that has a gender (noun) or POS set. English terms are
@@ -209,16 +212,33 @@ public nonisolated final class QuestionGenerator: @unchecked Sendable {
                 if gender != nil, pos != nil { break }
             }
             let bucket = Self.classify(pos: pos, gender: gender)
-            let example = try ExampleSentenceService.fetchExamples(db: db, termId: frontTermId, limit: 1).first
+            let example = try promptTerm.flatMap {
+                try ExampleSentenceService.fetchExamples(db: db, termId: $0.termId, limit: 1).first
+            }
 
             return Payload(
-                frontSurface: frontSurface,
-                backSurfaces: [backSurface],
+                frontSurface: promptTerm?.surface ?? "?",
+                frontSurfaces: frontTerms.map(\.surface),
+                backSurfaces: backTerms.map(\.surface),
                 frontExample: example?.text(for: frontLangCode),
                 backExample: example?.text(for: backLangCode),
                 backLangCode: backLangCode,
                 bucket: bucket
             )
+        }
+    }
+
+    private static func fetchTermSurfaces(db: Database, termIds: [Int64], languageCode: String) throws -> [TermSurface] {
+        guard !termIds.isEmpty else { return [] }
+        return try termIds.compactMap { termId in
+            guard let surface = try String.fetchOne(db, sql: """
+                SELECT t.surface FROM term t
+                JOIN language l ON l.id = t.language_id
+                WHERE t.id = ? AND l.code = ?
+                """, arguments: [termId, languageCode]) else {
+                return nil
+            }
+            return TermSurface(termId: termId, surface: surface)
         }
     }
 

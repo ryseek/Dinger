@@ -47,11 +47,19 @@ public final class DeckListViewModel {
 public struct CardRow: Identifiable, Hashable, Sendable {
     public let id: Int64
     public let card: Card
-    public let frontSurface: String
-    public let backSurface: String
+    public let frontSurfaces: [String]
+    public let backSurfaces: [String]
     public let dueAt: Date?
     public let repetitions: Int
     public let suspended: Bool
+
+    public var frontSurface: String {
+        frontSurfaces.first ?? "?"
+    }
+
+    public var backSurface: String {
+        backSurfaces.first ?? "?"
+    }
 }
 
 @Observable
@@ -101,7 +109,7 @@ public final class DeckDetailViewModel {
     private func fetchRows() async throws -> [CardRow] {
         guard let deckId = deck.id else { return [] }
         return try await database.dbWriter.read { db in
-            try Row.fetchAll(db, sql: """
+            let rows = try Row.fetchAll(db, sql: """
                 SELECT c.*,
                        tf.surface AS front_surface,
                        tb.surface AS back_surface,
@@ -114,27 +122,41 @@ public final class DeckDetailViewModel {
                  WHERE c.deck_id = ?
                  ORDER BY c.created_at DESC
                 """, arguments: [deckId])
-            .map { row -> CardRow in
+            return try rows.map { row -> CardRow in
                 let card = Card(
                     id: row["id"],
                     deckId: row["deck_id"],
                     senseId: row["sense_id"],
                     frontTermId: row["front_term_id"],
                     backTermId: row["back_term_id"],
+                    frontTermIds: Card.decodeTermIds(row["front_term_ids"] ?? ""),
+                    backTermIds: Card.decodeTermIds(row["back_term_ids"] ?? ""),
                     direction: CardDirection(rawValue: row["direction"]) ?? .sourceToTarget,
                     createdAt: row["created_at"],
                     suspended: (row["suspended"] as Int? ?? 0) != 0
                 )
+                let frontSurfaces = try Self.termSurfaces(db: db, termIds: card.frontTermIds)
+                let backSurfaces = try Self.termSurfaces(db: db, termIds: card.backTermIds)
                 return CardRow(
                     id: card.id ?? 0,
                     card: card,
-                    frontSurface: row["front_surface"] ?? "?",
-                    backSurface: row["back_surface"] ?? "?",
+                    frontSurfaces: frontSurfaces.isEmpty ? [row["front_surface"] ?? "?"] : frontSurfaces,
+                    backSurfaces: backSurfaces.isEmpty ? [row["back_surface"] ?? "?"] : backSurfaces,
                     dueAt: row["due_at"],
                     repetitions: row["repetitions"] ?? 0,
                     suspended: card.suspended
                 )
             }
         }
+    }
+
+    private nonisolated static func termSurfaces(db: Database, termIds: [Int64]) throws -> [String] {
+        guard !termIds.isEmpty else { return [] }
+        let surfacesById = try termIds.reduce(into: [Int64: String]()) { result, termId in
+            if let surface = try String.fetchOne(db, sql: "SELECT surface FROM term WHERE id = ?", arguments: [termId]) {
+                result[termId] = surface
+            }
+        }
+        return termIds.compactMap { surfacesById[$0] }
     }
 }

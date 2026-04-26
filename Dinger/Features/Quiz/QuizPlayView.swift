@@ -129,7 +129,11 @@ struct QuizPlayView: View {
     @ViewBuilder
     private func revealView(_ q: Question, inferredGrade: Grade?) -> some View {
         VStack(spacing: 16) {
-            Text(q.front).font(.title2).foregroundStyle(.secondary)
+            VStack(spacing: 6) {
+                ForEach(Array(q.displayFronts.enumerated()), id: \.offset) { _, front in
+                    Text(front).font(.title2).foregroundStyle(.secondary)
+                }
+            }
             if let frontExample = q.frontExample {
                 Text(frontExample)
                     .font(.callout)
