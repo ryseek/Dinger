@@ -34,6 +34,39 @@ public final class DeckListViewModel {
         }
     }
 
+    public func rename(_ deck: Deck, to name: String) async {
+        do {
+            _ = try await service.renameDeck(deck, to: name)
+            await reload()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    public func export(_ deck: Deck) async -> Data? {
+        do {
+            let data = try await service.exportDeck(deck)
+            error = nil
+            return data
+        } catch {
+            self.error = error.localizedDescription
+            return nil
+        }
+    }
+
+    public func importDeck(data: Data) async {
+        do {
+            _ = try await service.importDeck(from: data)
+            await reload()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    public func setError(_ message: String) {
+        error = message
+    }
+
     public func delete(_ deck: Deck) async {
         do {
             try await service.deleteDeck(deck)
@@ -67,7 +100,7 @@ public struct CardRow: Identifiable, Hashable, Sendable {
 public final class DeckDetailViewModel {
     public var rows: [CardRow] = []
     public var error: String?
-    public let deck: Deck
+    public private(set) var deck: Deck
 
     private let service: CardService
     private let database: AppDatabase
@@ -103,6 +136,30 @@ public final class DeckDetailViewModel {
         } catch {
             self.error = error.localizedDescription
         }
+    }
+
+    public func renameDeck(to name: String) async {
+        do {
+            deck = try await service.renameDeck(deck, to: name)
+            error = nil
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    public func exportDeck() async -> Data? {
+        do {
+            let data = try await service.exportDeck(deck)
+            error = nil
+            return data
+        } catch {
+            self.error = error.localizedDescription
+            return nil
+        }
+    }
+
+    public func setError(_ message: String) {
+        error = message
     }
 
     /// Fetch decorated rows off the writer queue.

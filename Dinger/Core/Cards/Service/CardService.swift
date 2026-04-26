@@ -7,6 +7,10 @@ public nonisolated enum CardServiceError: Error, LocalizedError, Sendable {
     case senseNotFound
     case duplicateAfterInvert
     case selectedTermNotFound
+    case invalidDeckName
+    case invalidDeckFile
+    case unsupportedDeckFileFormat(String)
+    case unresolvedDeckCard(String)
 
     public var errorDescription: String? {
         switch self {
@@ -15,6 +19,12 @@ public nonisolated enum CardServiceError: Error, LocalizedError, Sendable {
         case .senseNotFound:         return "Sense not found."
         case .duplicateAfterInvert:  return "A card with the opposite direction already exists in this deck."
         case .selectedTermNotFound:  return "The selected translation is no longer available."
+        case .invalidDeckName:       return "Deck name can't be empty."
+        case .invalidDeckFile:       return "This deck file is malformed or incomplete."
+        case .unsupportedDeckFileFormat(let format):
+            return "Unsupported deck file format: \(format)."
+        case .unresolvedDeckCard(let detail):
+            return "This deck contains a card that can't be matched to the current dictionary: \(detail)."
         }
     }
 }
@@ -65,10 +75,117 @@ public nonisolated final class CardService: @unchecked Sendable {
         }
     }
 
+    public func renameDeck(_ deck: Deck, to name: String) async throws -> Deck {
+        guard let id = deck.id else { throw CardServiceError.invalidDeckName }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw CardServiceError.invalidDeckName }
+
+        return try await database.dbWriter.write { db in
+            try db.execute(sql: "UPDATE deck SET name = ? WHERE id = ?",
+                           arguments: [trimmed, id])
+            var updated = deck
+            updated.name = trimmed
+            return updated
+        }
+    }
+
     public func deleteDeck(_ deck: Deck) async throws {
         guard let id = deck.id else { return }
         try await database.dbWriter.write { db in
             _ = try Deck.deleteOne(db, key: id)
+        }
+    }
+
+    public func exportDeck(_ deck: Deck) async throws -> Data {
+        guard let deckId = deck.id else { throw CardServiceError.invalidDeckFile }
+        let export = try await database.dbWriter.read { db in
+            let cards = try Card.filter(Column("deck_id") == deckId)
+                .order(Column("created_at").asc)
+                .fetchAll(db)
+            let exportedCards = try cards.map { try Self.exportedCard(db: db, deck: deck, card: $0) }
+            return DeckExportFile(
+                deck: ExportedDeck(
+                    name: deck.name,
+                    sourceLang: deck.sourceLang,
+                    targetLang: deck.targetLang
+                ),
+                cards: exportedCards
+            )
+        }
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return try encoder.encode(export)
+    }
+
+    public func importDeck(from data: Data) async throws -> Deck {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let export: DeckExportFile
+        do {
+            export = try decoder.decode(DeckExportFile.self, from: data)
+        } catch {
+            throw CardServiceError.invalidDeckFile
+        }
+
+        guard export.format == DeckExportFormat.current else {
+            throw CardServiceError.unsupportedDeckFileFormat(export.format)
+        }
+
+        let deckName = export.deck.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !deckName.isEmpty else { throw CardServiceError.invalidDeckName }
+        guard !export.deck.sourceLang.isEmpty, !export.deck.targetLang.isEmpty else {
+            throw CardServiceError.invalidDeckFile
+        }
+
+        return try await database.dbWriter.write { db in
+            guard try Self.hasDictionary(db: db, sourceLang: export.deck.sourceLang, targetLang: export.deck.targetLang) else {
+                throw CardServiceError.unresolvedDeckCard("\(export.deck.sourceLang)-\(export.deck.targetLang)")
+            }
+
+            var deck = Deck(
+                name: deckName,
+                sourceLang: export.deck.sourceLang,
+                targetLang: export.deck.targetLang
+            )
+            try deck.insert(db)
+            guard let deckId = deck.id else { throw CardServiceError.invalidDeckFile }
+
+            for exportedCard in export.cards {
+                let senseId = try Self.resolveSenseId(db: db, key: exportedCard.senseKey)
+                let frontTermIds = try Self.resolveTermIds(
+                    db: db,
+                    terms: exportedCard.frontTerms,
+                    senseId: senseId
+                )
+                let backTermIds = try Self.resolveTermIds(
+                    db: db,
+                    terms: exportedCard.backTerms,
+                    senseId: senseId
+                )
+                guard let frontTermId = frontTermIds.first,
+                      let backTermId = backTermIds.first else {
+                    throw CardServiceError.invalidDeckFile
+                }
+
+                var card = Card(
+                    deckId: deckId,
+                    senseId: senseId,
+                    frontTermId: frontTermId,
+                    backTermId: backTermId,
+                    frontTermIds: frontTermIds,
+                    backTermIds: backTermIds,
+                    direction: exportedCard.direction,
+                    createdAt: exportedCard.createdAt,
+                    suspended: exportedCard.suspended
+                )
+                try card.insert(db)
+                try CardSRS(cardId: card.id!).insert(db)
+            }
+
+            return deck
         }
     }
 
@@ -172,6 +289,123 @@ public nonisolated final class CardService: @unchecked Sendable {
             throw CardServiceError.selectedTermNotFound
         }
         return selected
+    }
+
+    private nonisolated static func exportedCard(db: Database, deck: Deck, card: Card) throws -> ExportedCard {
+        guard let senseRow = try Row.fetchOne(db, sql: """
+            SELECT e.raw AS entry_raw, s.position AS sense_position
+              FROM sense s
+              JOIN entry e ON e.id = s.entry_id
+             WHERE s.id = ?
+            """, arguments: [card.senseId]) else {
+            throw CardServiceError.senseNotFound
+        }
+
+        let senseKey = ExportedSenseKey(
+            sourceLang: deck.sourceLang,
+            targetLang: deck.targetLang,
+            entryRaw: senseRow["entry_raw"],
+            sensePosition: senseRow["sense_position"]
+        )
+
+        return ExportedCard(
+            senseKey: senseKey,
+            direction: card.direction,
+            frontTerms: try exportedTerms(db: db, senseId: card.senseId, termIds: card.frontTermIds),
+            backTerms: try exportedTerms(db: db, senseId: card.senseId, termIds: card.backTermIds),
+            suspended: card.suspended,
+            createdAt: card.createdAt
+        )
+    }
+
+    private nonisolated static func exportedTerms(db: Database, senseId: Int64, termIds: [Int64]) throws -> [ExportedTerm] {
+        try termIds.map { termId in
+            guard let row = try Row.fetchOne(db, sql: """
+                SELECT l.code AS language,
+                       t.surface,
+                       t.headword,
+                       t.normalized,
+                       t.pos,
+                       t.gender
+                  FROM term t
+                  JOIN language l ON l.id = t.language_id
+                 WHERE t.id = ? AND t.sense_id = ?
+                """, arguments: [termId, senseId]) else {
+                throw CardServiceError.selectedTermNotFound
+            }
+
+            return ExportedTerm(
+                language: row["language"],
+                surface: row["surface"],
+                headword: row["headword"],
+                normalized: row["normalized"],
+                pos: row["pos"],
+                gender: row["gender"]
+            )
+        }
+    }
+
+    private nonisolated static func hasDictionary(db: Database, sourceLang: String, targetLang: String) throws -> Bool {
+        let count = try Int.fetchOne(db, sql: """
+            SELECT COUNT(*)
+              FROM dictionary d
+              JOIN language sl ON sl.id = d.source_lang_id
+              JOIN language tl ON tl.id = d.target_lang_id
+             WHERE sl.code = ? AND tl.code = ?
+            """, arguments: [sourceLang, targetLang]) ?? 0
+        return count > 0
+    }
+
+    private nonisolated static func resolveSenseId(db: Database, key: ExportedSenseKey) throws -> Int64 {
+        let ids = try Int64.fetchAll(db, sql: """
+            SELECT s.id
+              FROM sense s
+              JOIN entry e ON e.id = s.entry_id
+              JOIN dictionary d ON d.id = e.dictionary_id
+              JOIN language sl ON sl.id = d.source_lang_id
+              JOIN language tl ON tl.id = d.target_lang_id
+             WHERE sl.code = ?
+               AND tl.code = ?
+               AND e.raw = ?
+               AND s.position = ?
+            """, arguments: [key.sourceLang, key.targetLang, key.entryRaw, key.sensePosition])
+
+        guard ids.count == 1, let senseId = ids.first else {
+            throw CardServiceError.unresolvedDeckCard(key.entryRaw)
+        }
+        return senseId
+    }
+
+    private nonisolated static func resolveTermIds(db: Database, terms: [ExportedTerm], senseId: Int64) throws -> [Int64] {
+        try terms.map { term in
+            let ids = try Int64.fetchAll(db, sql: """
+                SELECT t.id
+                  FROM term t
+                  JOIN language l ON l.id = t.language_id
+                 WHERE t.sense_id = ?
+                   AND l.code = ?
+                   AND t.surface = ?
+                   AND t.headword = ?
+                   AND t.normalized = ?
+                   AND (t.pos IS ? OR t.pos = ?)
+                   AND (t.gender IS ? OR t.gender = ?)
+                """, arguments: [
+                    senseId,
+                    term.language,
+                    term.surface,
+                    term.headword,
+                    term.normalized,
+                    term.pos,
+                    term.pos,
+                    term.gender,
+                    term.gender
+                ])
+
+            guard ids.count == 1, let termId = ids.first else {
+                throw CardServiceError.unresolvedDeckCard(term.surface)
+            }
+            return termId
+        }
     }
 
     public func cards(in deck: Deck) async throws -> [Card] {

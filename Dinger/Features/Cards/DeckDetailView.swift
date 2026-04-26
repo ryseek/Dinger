@@ -1,9 +1,15 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct DeckDetailView: View {
     let env: AppEnvironment
     let deck: Deck
     @State private var vm: DeckDetailViewModel
+    @State private var showRenameDeck = false
+    @State private var renameDeckName = ""
+    @State private var showExportDeck = false
+    @State private var exportFilename = "deck"
+    @State private var exportDocument = DeckJSONDocument(data: Data())
 
     init(env: AppEnvironment, deck: Deck) {
         self.env = env
@@ -50,7 +56,43 @@ struct DeckDetailView: View {
                 Section { Text(err).foregroundStyle(.red) }
             }
         }
-        .navigationTitle(deck.name)
+        .navigationTitle(vm.deck.name)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Button {
+                        renameDeckName = vm.deck.name
+                        showRenameDeck = true
+                    } label: {
+                        Label("Rename", systemImage: "pencil")
+                    }
+                    Button {
+                        exportDeck()
+                    } label: {
+                        Label("Export JSON", systemImage: "square.and.arrow.up")
+                    }
+                } label: {
+                    Label("Deck Actions", systemImage: "ellipsis.circle")
+                }
+            }
+        }
+        .alert("Rename deck", isPresented: $showRenameDeck) {
+            TextField("Deck name", text: $renameDeckName)
+            Button("Cancel", role: .cancel) {}
+            Button("Rename") {
+                let trimmed = renameDeckName.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { return }
+                Task { await vm.renameDeck(to: trimmed) }
+            }
+        }
+        .fileExporter(isPresented: $showExportDeck,
+                      document: exportDocument,
+                      contentType: .json,
+                      defaultFilename: exportFilename) { result in
+            if case .failure(let error) = result {
+                vm.setError(error.localizedDescription)
+            }
+        }
         .task { await vm.reload() }
         .refreshable { await vm.reload() }
     }
@@ -84,5 +126,25 @@ struct DeckDetailView: View {
         if days == 0 { return "Due today" }
         if days == 1 { return "Due tomorrow" }
         return "Due in \(days)d"
+    }
+
+    private func exportDeck() {
+        Task {
+            guard let data = await vm.exportDeck() else { return }
+            exportDocument = DeckJSONDocument(data: data)
+            exportFilename = exportFileName(for: vm.deck)
+            showExportDeck = true
+        }
+    }
+
+    private func exportFileName(for deck: Deck) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        let slug = deck.name
+            .lowercased()
+            .map { character -> Character in
+                character.unicodeScalars.allSatisfy { allowed.contains($0) } ? character : "-"
+            }
+        let collapsed = String(slug).split(separator: "-").joined(separator: "-")
+        return collapsed.isEmpty ? "deck" : "\(collapsed)-deck"
     }
 }
