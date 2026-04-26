@@ -75,7 +75,7 @@ struct QuizPlayView: View {
                 .font(.largeTitle)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
-            if let frontExample = q.frontExample {
+            if config.showExamplesDuringQuestion, let frontExample = q.frontExample {
                 Text(frontExample)
                     .font(.callout)
                     .foregroundStyle(.secondary)

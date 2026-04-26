@@ -21,3 +21,4 @@ xcuserdata/
 !/resources/*.txt*.gz
 /resources/*.tsv
 !/resources/*.tsv.gz
+scripts/*

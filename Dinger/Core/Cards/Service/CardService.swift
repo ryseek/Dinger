@@ -119,7 +119,7 @@ public nonisolated final class CardService: @unchecked Sendable {
         return try encoder.encode(export)
     }
 
-    public func importDeck(from data: Data) async throws -> Deck {
+    public func importDeck(from data: Data, progress: (@Sendable (Double) -> Void)? = nil) async throws -> Deck {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
 
@@ -139,6 +139,7 @@ public nonisolated final class CardService: @unchecked Sendable {
         guard !export.deck.sourceLang.isEmpty, !export.deck.targetLang.isEmpty else {
             throw CardServiceError.invalidDeckFile
         }
+        progress?(0)
 
         return try await database.dbWriter.write { db in
             guard try Self.hasDictionary(db: db, sourceLang: export.deck.sourceLang, targetLang: export.deck.targetLang) else {
@@ -153,7 +154,12 @@ public nonisolated final class CardService: @unchecked Sendable {
             try deck.insert(db)
             guard let deckId = deck.id else { throw CardServiceError.invalidDeckFile }
 
-            for exportedCard in export.cards {
+            let totalCards = export.cards.count
+            if totalCards == 0 {
+                progress?(1)
+            }
+
+            for (index, exportedCard) in export.cards.enumerated() {
                 let senseId = try Self.resolveSenseId(db: db, key: exportedCard.senseKey)
                 let frontTermIds = try Self.resolveTermIds(
                     db: db,
@@ -183,6 +189,7 @@ public nonisolated final class CardService: @unchecked Sendable {
                 )
                 try card.insert(db)
                 try CardSRS(cardId: card.id!).insert(db)
+                progress?(Double(index + 1) / Double(totalCards))
             }
 
             return deck

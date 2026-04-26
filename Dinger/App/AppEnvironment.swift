@@ -11,6 +11,7 @@ public final class AppEnvironment {
     public let historyService: DictionaryHistoryService
     public let cardService: CardService
     public let defaultPair: LanguagePair
+    public var lastUsedDeckId: Int64?
 
     public init(database: AppDatabase, defaultPair: LanguagePair = .deEN) {
         self.database = database

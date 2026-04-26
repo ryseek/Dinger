@@ -13,6 +13,9 @@ struct EntryDetailView: View {
     @State private var isLoadingExamples = false
     @State private var saveMessage: String?
     @State private var saveError: String?
+    @State private var decks: [Deck] = []
+    @State private var selectedDeckId: Int64?
+    @State private var isLoadingDecks = false
 
     init(env: AppEnvironment,
          hit: SenseHit,
@@ -64,17 +67,31 @@ struct EntryDetailView: View {
                 }
             }
             Section("Save to deck") {
-                Button {
-                    Task { await save(direction: .sourceToTarget) }
-                } label: {
-                    Label("Save \(env.defaultPair.source.uppercased()) → \(env.defaultPair.target.uppercased())",
-                          systemImage: "plus.rectangle.on.rectangle")
-                }
-                Button {
-                    Task { await save(direction: .targetToSource) }
-                } label: {
-                    Label("Save \(env.defaultPair.target.uppercased()) → \(env.defaultPair.source.uppercased())",
-                          systemImage: "arrow.left.arrow.right.square")
+                if isLoadingDecks {
+                    ProgressView()
+                } else if decks.isEmpty {
+                    Text("No decks available.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Picker("Deck", selection: Binding(
+                        get: { selectedDeckId ?? decks.first?.id ?? -1 },
+                        set: { newId in
+                            selectedDeckId = newId
+                            env.lastUsedDeckId = newId
+                            saveMessage = nil
+                            saveError = nil
+                        }
+                    )) {
+                        ForEach(decks) { deck in
+                            Text(deck.name).tag(deck.id ?? -1)
+                        }
+                    }
+                    Button {
+                        Task { await save() }
+                    } label: {
+                        Label("Save to deck", systemImage: "plus.rectangle.on.rectangle")
+                    }
+                    .disabled(selectedDeck == nil)
                 }
                 if let msg = saveMessage {
                     Text(msg).font(.footnote).foregroundStyle(.green)
@@ -94,21 +111,34 @@ struct EntryDetailView: View {
         .task(id: exampleSelectionKey) {
             await loadExamples()
         }
+        .task {
+            await loadDecks()
+        }
     }
 
     private var exampleSelectionKey: String {
         "\(selectedSourceTermIdsArray)-\(selectedTargetTermIdsArray)"
     }
 
+    private var selectedDeck: Deck? {
+        guard let selectedDeckId else { return decks.first }
+        return decks.first { $0.id == selectedDeckId }
+    }
+
     private func loadExamples() async {
         isLoadingExamples = true
         examplesError = nil
         do {
-            var seen = Set<Int64>()
+            var seenIds = Set<Int64>()
+            var seenGermanTexts = Set<String>()
+            var seenEnglishTexts = Set<String>()
             var matches: [ExampleSentence] = []
             for termId in selectedSourceTermIdsArray + selectedTargetTermIdsArray where termId != 0 {
                 let termMatches = try await env.exampleSentenceService.examples(for: termId, limit: 3)
-                for example in termMatches where seen.insert(example.id).inserted {
+                for example in termMatches
+                    where seenIds.insert(example.id).inserted
+                    && seenGermanTexts.insert(TextNormalizer.normalize(example.germanText)).inserted
+                    && seenEnglishTexts.insert(TextNormalizer.normalize(example.englishText)).inserted {
                     matches.append(example)
                     if matches.count >= 3 { break }
                 }
@@ -123,14 +153,38 @@ struct EntryDetailView: View {
         }
     }
 
-    private func save(direction: CardDirection) async {
+    private func loadDecks() async {
+        isLoadingDecks = true
+        saveError = nil
+        do {
+            _ = try await env.cardService.ensureDefaultDeck(for: env.defaultPair)
+            decks = try await env.cardService.allDecks()
+            if let lastUsedDeckId = env.lastUsedDeckId,
+               decks.contains(where: { $0.id == lastUsedDeckId }) {
+                selectedDeckId = lastUsedDeckId
+            } else {
+                selectedDeckId = decks.first?.id
+                env.lastUsedDeckId = selectedDeckId
+            }
+            isLoadingDecks = false
+        } catch {
+            decks = []
+            isLoadingDecks = false
+            saveError = error.localizedDescription
+        }
+    }
+
+    private func save() async {
         saveError = nil
         saveMessage = nil
         do {
-            let deck = try await env.cardService.ensureDefaultDeck(for: env.defaultPair)
+            guard let deck = selectedDeck else {
+                throw CardServiceError.invalidDeckFile
+            }
+            env.lastUsedDeckId = deck.id
             let result = try await env.cardService.createCard(
                 from: hit,
-                direction: direction,
+                direction: .sourceToTarget,
                 deck: deck,
                 selectedSourceTermIds: selectedSourceTermIdsArray,
                 selectedTargetTermIds: selectedTargetTermIdsArray
@@ -200,6 +254,7 @@ private struct TermSelectionList: View {
                                 .accessibilityLabel("Selected \(selectableLabel)")
                         }
                     }
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }

@@ -10,6 +10,7 @@ public final class QuizStartViewModel {
     public var direction: QuizDirectionMode = .native
     public var maxQuestions: Int = 10
     public var includeNew: Bool = true
+    public var showExamplesDuringQuestion: Bool = false
     public var practiceMode: Bool = false
     public var error: String?
 
@@ -34,6 +35,7 @@ public final class QuizStartViewModel {
                    direction: direction,
                    maxQuestions: maxQuestions,
                    includeNewCards: includeNew,
+                   showExamplesDuringQuestion: showExamplesDuringQuestion,
                    practiceMode: practiceMode)
     }
 }

@@ -22,6 +22,21 @@ struct CardsRootView: View {
     var body: some View {
         NavigationStack {
             List {
+                if vm.isAddingDeck {
+                    Section {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(vm.deckAddStatus ?? "Adding deck...")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            if let progress = vm.deckAddProgress {
+                                ProgressView(value: progress)
+                            } else {
+                                ProgressView()
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
                 ForEach(vm.decks) { deck in
                     NavigationLink {
                         DeckDetailView(env: env, deck: deck)

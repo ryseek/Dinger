@@ -43,6 +43,7 @@ struct QuizRootView: View {
                     Stepper("Questions: \(vm.maxQuestions)", value: $vm.maxQuestions, in: 5...50, step: 5)
                     Toggle("Include new cards", isOn: $vm.includeNew)
                         .disabled(vm.practiceMode)
+                    Toggle("Show examples during question", isOn: $vm.showExamplesDuringQuestion)
                     Toggle("Practice (ignore due dates)", isOn: $vm.practiceMode)
                 } header: {
                     Text("Mode")

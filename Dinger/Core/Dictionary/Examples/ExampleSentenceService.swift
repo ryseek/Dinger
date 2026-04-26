@@ -42,16 +42,32 @@ public nonisolated final class ExampleSentenceService: @unchecked Sendable {
         guard !query.isEmpty else { return [] }
 
         let lengthExpression = languageCode == "de" ? "LENGTH(e.de_text)" : "LENGTH(e.en_text)"
+        let duplicateExpression = languageCode == "de" ? "e.de_normalized" : "e.en_normalized"
         let rows = try Row.fetchAll(db, sql: """
+            WITH ranked_examples AS (
             SELECT e.id,
                    e.de_tatoeba_id,
                    e.en_tatoeba_id,
                    e.de_text,
-                   e.en_text
+                   e.en_text,
+                   f.rank AS match_rank,
+                   \(lengthExpression) AS matched_length,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY \(duplicateExpression)
+                       ORDER BY f.rank, \(lengthExpression), e.id
+                   ) AS duplicate_rank
               FROM example_sentence_fts f
               JOIN example_sentence e ON e.id = f.rowid
              WHERE example_sentence_fts MATCH ?
-             ORDER BY bm25(example_sentence_fts), \(lengthExpression), e.id
+            )
+            SELECT id,
+                   de_tatoeba_id,
+                   en_tatoeba_id,
+                   de_text,
+                   en_text
+              FROM ranked_examples
+             WHERE duplicate_rank = 1
+             ORDER BY match_rank, matched_length, id
              LIMIT ?
             """, arguments: [query, limit])
 

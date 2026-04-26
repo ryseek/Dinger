@@ -39,6 +39,7 @@ public nonisolated struct QuizConfig: Sendable, Hashable {
     public var direction: QuizDirectionMode
     public var maxQuestions: Int
     public var includeNewCards: Bool
+    public var showExamplesDuringQuestion: Bool
     /// Ignore SRS due-dates and pull every non-suspended card in the deck.
     /// Graded answers still update SRS state normally, so this is extra
     /// practice rather than a loophole that hides already-learned cards.
@@ -48,11 +49,13 @@ public nonisolated struct QuizConfig: Sendable, Hashable {
                 direction: QuizDirectionMode = .native,
                 maxQuestions: Int = 20,
                 includeNewCards: Bool = true,
+                showExamplesDuringQuestion: Bool = false,
                 practiceMode: Bool = false) {
         self.mode = mode
         self.direction = direction
         self.maxQuestions = maxQuestions
         self.includeNewCards = includeNewCards
+        self.showExamplesDuringQuestion = showExamplesDuringQuestion
         self.practiceMode = practiceMode
     }
 }

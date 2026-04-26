@@ -61,7 +61,7 @@ public nonisolated final class QuizSession: @unchecked Sendable {
                 maxCards: config.maxQuestions
             ).shuffled()
         } else {
-            let maxNew = config.includeNewCards ? 20 : 0
+            let maxNew = config.includeNewCards ? config.maxQuestions : 0
             cards = try await cardService.reviewQueue(
                 deck: deck,
                 maxCards: config.maxQuestions,

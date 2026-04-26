@@ -7,6 +7,9 @@ import GRDB
 public final class DeckListViewModel {
     public var decks: [Deck] = []
     public var error: String?
+    public var isAddingDeck = false
+    public var deckAddProgress: Double?
+    public var deckAddStatus: String?
     private let service: CardService
     private let pair: LanguagePair
 
@@ -26,6 +29,8 @@ public final class DeckListViewModel {
     }
 
     public func createDeck(name: String) async {
+        beginDeckAdd(status: "Creating deck...", progress: nil)
+        defer { finishDeckAdd() }
         do {
             _ = try await service.createDeck(name: name, pair: pair)
             await reload()
@@ -55,8 +60,14 @@ public final class DeckListViewModel {
     }
 
     public func importDeck(data: Data) async {
+        beginDeckAdd(status: "Importing deck...", progress: 0)
+        defer { finishDeckAdd() }
         do {
-            _ = try await service.importDeck(from: data)
+            _ = try await service.importDeck(from: data) { [weak self] progress in
+                Task { @MainActor in
+                    self?.deckAddProgress = progress
+                }
+            }
             await reload()
         } catch {
             self.error = error.localizedDescription
@@ -74,6 +85,19 @@ public final class DeckListViewModel {
         } catch {
             self.error = error.localizedDescription
         }
+    }
+
+    private func beginDeckAdd(status: String, progress: Double?) {
+        isAddingDeck = true
+        deckAddStatus = status
+        deckAddProgress = progress
+        error = nil
+    }
+
+    private func finishDeckAdd() {
+        isAddingDeck = false
+        deckAddStatus = nil
+        deckAddProgress = nil
     }
 }
 
