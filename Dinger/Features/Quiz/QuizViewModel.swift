@@ -5,29 +5,82 @@ import Observation
 @MainActor
 public final class QuizStartViewModel {
     public var decks: [Deck] = []
-    public var selectedDeck: Deck?
-    public var mode: QuizMode = .mixed
-    public var direction: QuizDirectionMode = .native
-    public var maxQuestions: Int = 10
-    public var includeNew: Bool = true
-    public var showExamplesDuringQuestion: Bool = false
-    public var practiceMode: Bool = false
+    /// `nil` means every deck; otherwise this is the selected deck id.
+    public var selectedDeckId: Int64? {
+        didSet {
+            defaults.set(selectedDeckId.map(String.init) ?? "all", forKey: Keys.deckSelection)
+        }
+    }
+    public var mode: QuizMode {
+        didSet { defaults.set(mode.rawValue, forKey: Keys.mode) }
+    }
+    public var direction: QuizDirectionMode {
+        didSet { defaults.set(direction.rawValue, forKey: Keys.direction) }
+    }
+    public var maxQuestions: Int {
+        didSet { defaults.set(maxQuestions, forKey: Keys.maxQuestions) }
+    }
+    public var includeNew: Bool {
+        didSet { defaults.set(includeNew, forKey: Keys.includeNew) }
+    }
+    public var showExamplesDuringQuestion: Bool {
+        didSet { defaults.set(showExamplesDuringQuestion, forKey: Keys.showExamples) }
+    }
+    public var practiceMode: Bool {
+        didSet { defaults.set(practiceMode, forKey: Keys.practiceMode) }
+    }
     public var error: String?
 
     private let service: CardService
+    private let defaults: UserDefaults
 
-    public init(service: CardService) {
+    private enum Keys {
+        static let deckSelection = "quiz.last.deckSelection"
+        static let mode = "quiz.last.mode"
+        static let direction = "quiz.last.direction"
+        static let maxQuestions = "quiz.last.maxQuestions"
+        static let includeNew = "quiz.last.includeNew"
+        static let showExamples = "quiz.last.showExamples"
+        static let practiceMode = "quiz.last.practiceMode"
+    }
+
+    public init(service: CardService, defaults: UserDefaults = .standard) {
         self.service = service
+        self.defaults = defaults
+
+        let storedDeck = defaults.string(forKey: Keys.deckSelection)
+        self.selectedDeckId = storedDeck.flatMap { $0 == "all" ? nil : Int64($0) }
+        self.mode = defaults.string(forKey: Keys.mode)
+            .flatMap(QuizMode.init(rawValue:)) ?? .mixed
+        self.direction = defaults.string(forKey: Keys.direction)
+            .flatMap(QuizDirectionMode.init(rawValue:)) ?? .native
+        let storedQuestionCount = defaults.object(forKey: Keys.maxQuestions) as? Int ?? 10
+        self.maxQuestions = min(max(storedQuestionCount, 5), 50)
+        self.includeNew = defaults.object(forKey: Keys.includeNew) as? Bool ?? true
+        self.showExamplesDuringQuestion = defaults.object(forKey: Keys.showExamples) as? Bool ?? false
+        self.practiceMode = defaults.object(forKey: Keys.practiceMode) as? Bool ?? false
     }
 
     public func load() async {
         do {
             decks = try await service.allDecks()
-            if selectedDeck == nil { selectedDeck = decks.first }
+            if let selectedDeckId, !decks.contains(where: { $0.id == selectedDeckId }) {
+                self.selectedDeckId = nil
+            }
             error = nil
         } catch {
             self.error = error.localizedDescription
         }
+    }
+
+    public var selectedDecks: [Deck] {
+        guard let selectedDeckId else { return decks }
+        return decks.filter { $0.id == selectedDeckId }
+    }
+
+    public var selectedDeck: Deck? {
+        guard let selectedDeckId else { return nil }
+        return decks.first { $0.id == selectedDeckId }
     }
 
     public func makeConfig() -> QuizConfig {

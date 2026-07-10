@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 
 /// Drives a single quiz run. UI-framework free so it's testable.
 ///
@@ -13,12 +14,13 @@ import Foundation
 ///   // session.progress holds final counts
 public nonisolated final class QuizSession: @unchecked Sendable {
 
-    public let deck: Deck
+    public let decks: [Deck]
     public let config: QuizConfig
     private let cardService: CardService
-    private let generator: QuestionGenerator
+    private let generators: [Int64: QuestionGenerator]
 
     private var queue: [Card] = []
+    private var cardsById: [Int64: Card] = [:]
     private var state = State()
 
     private struct State {
@@ -28,14 +30,17 @@ public nonisolated final class QuizSession: @unchecked Sendable {
         var startedAt: Date = .distantPast
     }
 
-    public init(deck: Deck,
+    public init(decks: [Deck],
                 config: QuizConfig,
                 cardService: CardService,
-                generator: QuestionGenerator) {
-        self.deck = deck
+                reader: any DatabaseReader) {
+        self.decks = decks
         self.config = config
         self.cardService = cardService
-        self.generator = generator
+        self.generators = Dictionary(uniqueKeysWithValues: decks.compactMap { deck in
+            guard let deckId = deck.id else { return nil }
+            return (deckId, QuestionGenerator(reader: reader, deck: deck))
+        })
     }
 
     public var progress: QuizProgress {
@@ -57,18 +62,21 @@ public nonisolated final class QuizSession: @unchecked Sendable {
             // with the same cards; ordering priorities are less important
             // when there's no "due" contract to honor.
             cards = try await cardService.practiceQueue(
-                deck: deck,
+                decks: decks,
                 maxCards: config.maxQuestions
             ).shuffled()
         } else {
             let maxNew = config.includeNewCards ? config.maxQuestions : 0
             cards = try await cardService.reviewQueue(
-                deck: deck,
+                decks: decks,
                 maxCards: config.maxQuestions,
                 maxNew: maxNew
             )
         }
         queue = Array(cards.prefix(config.maxQuestions))
+        cardsById = Dictionary(uniqueKeysWithValues: queue.compactMap { card in
+            card.id.map { ($0, card) }
+        })
         state = State()
         state.startedAt = Date()
     }
@@ -76,6 +84,7 @@ public nonisolated final class QuizSession: @unchecked Sendable {
     public func nextQuestion() async throws -> Question? {
         guard !queue.isEmpty else { return nil }
         let card = queue.removeFirst()
+        guard let generator = generators[card.deckId] else { return try await nextQuestion() }
         let override = resolveDirection(for: card)
         return try await generator.makeQuestion(for: card, mode: config.mode, directionOverride: override)
     }
@@ -90,7 +99,7 @@ public nonisolated final class QuizSession: @unchecked Sendable {
     }
 
     public func recordAnswer(_ question: Question, grade: Grade) async throws {
-        guard let card = try await fetchCard(id: question.id) else { return }
+        guard let card = cardsById[question.id] else { return }
         _ = try await cardService.grade(card: card, grade: grade)
         state.answered += 1
         state.perGrade[grade, default: 0] += 1
@@ -112,14 +121,6 @@ public nonisolated final class QuizSession: @unchecked Sendable {
     public static func gradeForChoice(_ choiceIndex: Int, question: Question) -> Grade {
         guard question.kind == .multipleChoice, let correct = question.correctIndex else { return .again }
         return choiceIndex == correct ? .good : .again
-    }
-
-    // MARK: - helpers
-
-    private func fetchCard(id: Int64) async throws -> Card? {
-        // Small helper: re-read the card via the service's deck listing.
-        let all = try await cardService.cards(in: deck)
-        return all.first { $0.id == id }
     }
 
     private static func levenshtein(_ a: String, _ b: String) -> Int {

@@ -57,4 +57,83 @@ final class CardServiceTests: XCTestCase {
         let practiceQueue = try await service.practiceQueue(deck: deck, maxCards: 10)
         XCTAssertEqual(Set(practiceQueue.compactMap(\.id)), Set([dueCard.id, newCard.id].compactMap { $0 }))
     }
+
+    func testCombinedQueuesIncludeCardsFromEveryDeckWithGlobalLimits() async throws {
+        let database = try await TestDatabaseSupport.makeDatabase()
+        let service = CardService(database: database)
+        let firstDeck = try await service.createDeck(name: "First", pair: .deEN)
+        let secondDeck = try await service.createDeck(name: "Second", pair: .deEN)
+        let dueCard = try await TestDatabaseSupport.card("Haus", deck: firstDeck, service: service, database: database)
+        let firstNew = try await TestDatabaseSupport.card("Baum", deck: firstDeck, service: service, database: database)
+        let secondDue = try await TestDatabaseSupport.card("Katze", deck: secondDeck, service: service, database: database)
+        let reviewedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        _ = try await service.grade(card: dueCard, grade: .good, now: reviewedAt)
+        _ = try await service.grade(card: secondDue, grade: .good, now: reviewedAt)
+
+        let queue = try await service.reviewQueue(
+            decks: [firstDeck, secondDeck],
+            now: reviewedAt.addingTimeInterval(2 * 86_400),
+            maxCards: 2,
+            maxNew: 1
+        )
+
+        XCTAssertEqual(queue.count, 2)
+        XCTAssertEqual(Set(queue.map(\.deckId)), Set([try XCTUnwrap(firstDeck.id), try XCTUnwrap(secondDeck.id)]))
+
+        let practice = try await service.practiceQueue(decks: [firstDeck, secondDeck], maxCards: 10)
+        XCTAssertEqual(
+            Set(practice.compactMap(\.id)),
+            Set([dueCard.id, firstNew.id, secondDue.id].compactMap { $0 })
+        )
+    }
+
+    func testDeckStatisticsSummarizeProgressAndHardestCards() async throws {
+        let database = try await TestDatabaseSupport.makeDatabase()
+        let service = CardService(database: database)
+        let deck = try await service.createDeck(name: "Study", pair: .deEN)
+        let difficultCard = try await TestDatabaseSupport.card("Haus", deck: deck, service: service, database: database)
+        let learnedCard = try await TestDatabaseSupport.card("Baum", deck: deck, service: service, database: database)
+        let reviewedAt = Date(timeIntervalSince1970: 1_700_000_000)
+
+        _ = try await service.grade(card: difficultCard, grade: .again, now: reviewedAt)
+        _ = try await service.grade(card: difficultCard, grade: .again, now: reviewedAt.addingTimeInterval(60))
+        _ = try await service.grade(card: learnedCard, grade: .good, now: reviewedAt)
+
+        let viewModel = DeckDetailViewModel(service: service, database: database, deck: deck)
+        await viewModel.reload()
+
+        XCTAssertEqual(viewModel.statistics.totalCards, 2)
+        XCTAssertEqual(viewModel.statistics.reviewedCards, 2)
+        XCTAssertEqual(viewModel.statistics.reviewedFraction, 1)
+        XCTAssertEqual(viewModel.statistics.dueCards, 2)
+        XCTAssertEqual(viewModel.statistics.totalReviews, 3)
+        XCTAssertEqual(viewModel.statistics.totalRepetitions, 1)
+        XCTAssertEqual(viewModel.statistics.matureCards, 0)
+        XCTAssertEqual(viewModel.statistics.learningCards, 2)
+        XCTAssertEqual(viewModel.statistics.successfulReviews, 1)
+        XCTAssertEqual(viewModel.statistics.retentionRate, 1.0 / 3.0, accuracy: 0.001)
+        XCTAssertEqual(viewModel.statistics.hardestCards.first?.id, difficultCard.id)
+        XCTAssertEqual(viewModel.statistics.hardestCards.first?.againCount, 2)
+        XCTAssertEqual(viewModel.statistics.hardestCards.first?.reviewCount, 2)
+    }
+
+    func testDeckListActivitySummarizesTodayAndStreak() async throws {
+        let database = try await TestDatabaseSupport.makeDatabase()
+        let service = CardService(database: database)
+        let deck = try await service.createDeck(name: "Study", pair: .deEN)
+        let card = try await TestDatabaseSupport.card("Haus", deck: deck, service: service, database: database)
+        let calendar = Calendar.autoupdatingCurrent
+        let now = Date()
+        let yesterday = try XCTUnwrap(calendar.date(byAdding: .day, value: -1, to: now))
+
+        _ = try await service.grade(card: card, grade: .good, now: yesterday)
+        _ = try await service.grade(card: card, grade: .again, now: now)
+        let viewModel = DeckListViewModel(service: service, database: database, pair: .deEN)
+        await viewModel.reload()
+
+        XCTAssertEqual(viewModel.activity.activity(on: now)?.reviewCount, 1)
+        XCTAssertEqual(viewModel.activity.activity(on: now)?.correctCount, 0)
+        XCTAssertEqual(viewModel.activity.activity(on: yesterday)?.reviewCount, 1)
+        XCTAssertEqual(viewModel.activity.currentStreak, 2)
+    }
 }

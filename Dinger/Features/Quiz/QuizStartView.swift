@@ -7,7 +7,7 @@ struct QuizRootView: View {
 
     struct ActiveConfig: Identifiable, Hashable {
         let id = UUID()
-        let deck: Deck
+        let decks: [Deck]
         let config: QuizConfig
     }
 
@@ -25,9 +25,11 @@ struct QuizRootView: View {
                             .foregroundStyle(.secondary)
                     } else {
                         Picker("Deck", selection: Binding(
-                            get: { vm.selectedDeck?.id ?? -1 },
-                            set: { newId in vm.selectedDeck = vm.decks.first { $0.id == newId } }
+                            get: { vm.selectedDeckId ?? -1 },
+                            set: { newId in vm.selectedDeckId = newId == -1 ? nil : newId }
                         )) {
+                            Label("All Decks", systemImage: "rectangle.stack.fill")
+                                .tag(Int64(-1))
                             ForEach(vm.decks) { deck in
                                 Text(deck.name).tag(deck.id ?? -1)
                             }
@@ -61,12 +63,12 @@ struct QuizRootView: View {
                 }
                 Section {
                     Button {
-                        guard let deck = vm.selectedDeck else { return }
-                        activeConfig = ActiveConfig(deck: deck, config: vm.makeConfig())
+                        guard !vm.selectedDecks.isEmpty else { return }
+                        activeConfig = ActiveConfig(decks: vm.selectedDecks, config: vm.makeConfig())
                     } label: {
                         Label("Start", systemImage: "play.fill")
                     }
-                    .disabled(vm.selectedDeck == nil)
+                    .disabled(vm.selectedDecks.isEmpty)
                 } footer: {
                     Text("""
                     Open-source resources:
@@ -84,12 +86,20 @@ struct QuizRootView: View {
             .task { await vm.load() }
             .refreshable { await vm.load() }
             .sheet(item: $activeConfig) { ac in
-                QuizPlayView(env: env, deck: ac.deck, config: ac.config)
+                QuizPlayView(env: env, decks: ac.decks, config: ac.config)
             }
         }
     }
 
     private func directionLabel(for mode: QuizDirectionMode) -> String {
+        if vm.selectedDeckId == nil {
+            switch mode {
+            case .native: return "Card default"
+            case .sourceToTarget: return "Source → Target"
+            case .targetToSource: return "Target → Source"
+            case .mixed: return "Both (random)"
+            }
+        }
         let pair = LanguagePair(source: vm.selectedDeck?.sourceLang ?? env.defaultPair.source,
                                 target: vm.selectedDeck?.targetLang ?? env.defaultPair.target)
         return mode.displayLabel(for: pair)

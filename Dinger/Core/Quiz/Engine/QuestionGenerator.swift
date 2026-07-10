@@ -10,7 +10,7 @@ public nonisolated final class QuestionGenerator: @unchecked Sendable {
     private let deck: Deck
     private let distractorCount: Int
 
-    public init(reader: any DatabaseReader, deck: Deck, distractorCount: Int = 3) {
+    public init(reader: any DatabaseReader, deck: Deck, distractorCount: Int = 7) {
         self.reader = reader
         self.deck = deck
         self.distractorCount = distractorCount
@@ -58,13 +58,15 @@ public nonisolated final class QuestionGenerator: @unchecked Sendable {
             )
 
         case .multipleChoice:
-            // Match distractors to the sense's POS bucket so a noun question
-            // doesn't get adjective/verb distractors (which would leak the
-            // answer). Over-fetch so that post-cleanup dedupe still yields
+            // Blend same-category vocabulary from personal cards and the
+            // dictionary. Over-fetch so post-cleanup dedupe still yields
             // `distractorCount` distinct options.
             let rawDistractors = try await fetchDistractors(
                 excludingSenseId: card.senseId,
+                frontLangCode: payload.frontLangCode,
                 backLangCode: payload.backLangCode,
+                frontSurface: payload.frontSurface,
+                correctSurfaces: payload.backSurfaces,
                 bucket: payload.bucket,
                 limit: distractorCount * 4
             )
@@ -162,6 +164,7 @@ public nonisolated final class QuestionGenerator: @unchecked Sendable {
         let backSurfaces: [String]
         let frontExample: String?
         let backExample: String?
+        let frontLangCode: String
         let backLangCode: String
         let bucket: POSBucket
     }
@@ -222,6 +225,7 @@ public nonisolated final class QuestionGenerator: @unchecked Sendable {
                 backSurfaces: backTerms.map(\.surface),
                 frontExample: example?.text(for: frontLangCode),
                 backExample: example?.text(for: backLangCode),
+                frontLangCode: frontLangCode,
                 backLangCode: backLangCode,
                 bucket: bucket
             )
@@ -242,73 +246,212 @@ public nonisolated final class QuestionGenerator: @unchecked Sendable {
         }
     }
 
+    private struct DistractorCandidate {
+        let surface: String
+        let sharesPromptTranslation: Bool
+    }
+
     private func fetchDistractors(excludingSenseId: Int64,
+                                  frontLangCode: String,
                                   backLangCode: String,
+                                  frontSurface: String,
+                                  correctSurfaces: [String],
                                   bucket: POSBucket,
                                   limit: Int) async throws -> [String] {
-        let deckId = deck.id ?? -1
         return try await reader.read { db in
-            var picked: [String] = []
+            let poolLimit = max(limit, 12)
+            let frontKey = TextNormalizer.normalize(stripDisplayMarkup(frontSurface))
 
+            let cardWords: [DistractorCandidate]
+            let dictionaryWords: [DistractorCandidate]
             if let cond = bucket.sqlCondition {
-                // Same-bucket distractors: limit to senses that have at least
-                // one term (on any side) matching the bucket.
-                picked = try String.fetchAll(db, sql: """
-                    SELECT DISTINCT t.surface FROM card c
-                    JOIN term t ON t.id = c.back_term_id
+                // Pull same-category vocabulary from every personal deck.
+                // Joining through the sense makes this direction-independent.
+                let cardRows = try Row.fetchAll(db, sql: """
+                    SELECT DISTINCT t.surface,
+                           EXISTS (
+                               SELECT 1
+                                 FROM term clue
+                                 JOIN language clue_language ON clue_language.id = clue.language_id
+                                WHERE clue.sense_id = t.sense_id
+                                  AND clue_language.code = ?
+                                  AND clue.normalized = ?
+                           ) AS semantic_match
+                      FROM card c
+                      JOIN term t ON t.sense_id = c.sense_id
+                      JOIN language l ON l.id = t.language_id
+                     WHERE c.sense_id != ?
+                       AND l.code = ?
+                       AND c.sense_id IN (
+                           SELECT sense_id FROM term WHERE \(cond)
+                       )
+                     ORDER BY RANDOM()
+                     LIMIT ?
+                    """, arguments: [frontLangCode, frontKey, excludingSenseId, backLangCode, poolLimit])
+                cardWords = Self.candidates(from: cardRows)
+
+                let dictionaryRows = try Row.fetchAll(db, sql: """
+                    SELECT t.surface,
+                           EXISTS (
+                               SELECT 1
+                                 FROM term clue
+                                 JOIN language clue_language ON clue_language.id = clue.language_id
+                                WHERE clue.sense_id = t.sense_id
+                                  AND clue_language.code = ?
+                                  AND clue.normalized = ?
+                           ) AS semantic_match
+                      FROM term t
                     JOIN language l ON l.id = t.language_id
-                    WHERE c.deck_id = ?
-                      AND c.sense_id != ?
-                      AND l.code = ?
-                      AND c.sense_id IN (
+                    WHERE l.code = ?
+                      AND t.sense_id != ?
+                      AND t.sense_id IN (
                           SELECT sense_id FROM term WHERE \(cond)
                       )
                     ORDER BY RANDOM()
                     LIMIT ?
-                    """, arguments: [deckId, excludingSenseId, backLangCode, limit])
-
-                if picked.count < limit {
-                    let more = try String.fetchAll(db, sql: """
-                        SELECT t.surface FROM term t
-                        JOIN language l ON l.id = t.language_id
-                        WHERE l.code = ?
-                          AND t.sense_id != ?
-                          AND t.sense_id IN (
-                              SELECT sense_id FROM term WHERE \(cond)
-                          )
-                        ORDER BY RANDOM()
-                        LIMIT ?
-                        """, arguments: [backLangCode, excludingSenseId, limit - picked.count])
-                    picked.append(contentsOf: more)
-                }
-            }
-
-            // Fallback: if the bucket is unknown or didn't produce enough
-            // candidates, top up with any-POS terms so the UI never shows
-            // a multiple-choice question with too few options.
-            if picked.count < limit {
-                let more = try String.fetchAll(db, sql: """
-                    SELECT DISTINCT t.surface FROM card c
-                    JOIN term t ON t.id = c.back_term_id
-                    JOIN language l ON l.id = t.language_id
-                    WHERE c.deck_id = ? AND c.sense_id != ? AND l.code = ?
-                    ORDER BY RANDOM()
-                    LIMIT ?
-                    """, arguments: [deckId, excludingSenseId, backLangCode, limit - picked.count])
-                picked.append(contentsOf: more)
-            }
-            if picked.count < limit {
-                let more = try String.fetchAll(db, sql: """
-                    SELECT t.surface FROM term t
+                    """, arguments: [frontLangCode, frontKey, backLangCode, excludingSenseId, poolLimit])
+                dictionaryWords = Self.candidates(from: dictionaryRows)
+            } else {
+                let cardRows = try Row.fetchAll(db, sql: """
+                    SELECT DISTINCT t.surface,
+                           EXISTS (
+                               SELECT 1
+                                 FROM term clue
+                                 JOIN language clue_language ON clue_language.id = clue.language_id
+                                WHERE clue.sense_id = t.sense_id
+                                  AND clue_language.code = ?
+                                  AND clue.normalized = ?
+                           ) AS semantic_match
+                      FROM card c
+                      JOIN term t ON t.sense_id = c.sense_id
+                      JOIN language l ON l.id = t.language_id
+                     WHERE c.sense_id != ? AND l.code = ?
+                     ORDER BY RANDOM()
+                     LIMIT ?
+                    """, arguments: [frontLangCode, frontKey, excludingSenseId, backLangCode, poolLimit])
+                cardWords = Self.candidates(from: cardRows)
+                let dictionaryRows = try Row.fetchAll(db, sql: """
+                    SELECT t.surface,
+                           EXISTS (
+                               SELECT 1
+                                 FROM term clue
+                                 JOIN language clue_language ON clue_language.id = clue.language_id
+                                WHERE clue.sense_id = t.sense_id
+                                  AND clue_language.code = ?
+                                  AND clue.normalized = ?
+                           ) AS semantic_match
+                      FROM term t
                     JOIN language l ON l.id = t.language_id
                     WHERE l.code = ? AND t.sense_id != ?
                     ORDER BY RANDOM()
                     LIMIT ?
-                    """, arguments: [backLangCode, excludingSenseId, limit - picked.count])
-                picked.append(contentsOf: more)
+                    """, arguments: [frontLangCode, frontKey, backLangCode, excludingSenseId, poolLimit])
+                dictionaryWords = Self.candidates(from: dictionaryRows)
             }
-            return picked
+
+            // If another sense has the exact same prompt translation, it is
+            // also a valid answer without sentence context (for example,
+            // wissen/kennen for "know"). Never use it as a false distractor.
+            let rankedCards = Self.rank(
+                cardWords.filter { !$0.sharesPromptTranslation },
+                against: correctSurfaces
+            )
+            let rankedDictionary = Self.rank(
+                dictionaryWords.filter { !$0.sharesPromptTranslation },
+                against: correctSurfaces
+            )
+            return Self.interleave([rankedCards, rankedDictionary])
         }
+    }
+
+    private static func candidates(from rows: [Row]) -> [DistractorCandidate] {
+        rows.map {
+            DistractorCandidate(
+                surface: $0["surface"],
+                sharesPromptTranslation: ($0["semantic_match"] as Int? ?? 0) != 0
+            )
+        }
+    }
+
+    private static func rank(_ candidates: [DistractorCandidate], against correctSurfaces: [String]) -> [String] {
+        candidates.enumerated().sorted { lhs, rhs in
+            let leftScore = confusionScore(lhs.element, correctSurfaces: correctSurfaces)
+            let rightScore = confusionScore(rhs.element, correctSurfaces: correctSurfaces)
+            if leftScore == rightScore { return lhs.offset < rhs.offset }
+            return leftScore > rightScore
+        }.map(\.element.surface)
+    }
+
+    private static func confusionScore(_ candidate: DistractorCandidate, correctSurfaces: [String]) -> Double {
+        let candidateKey = TextNormalizer.normalize(TextNormalizer.stripMarkup(candidate.surface))
+        let candidateMarkers = grammarMarkers(in: candidate.surface)
+        var best = 0.0
+
+        for correct in correctSurfaces {
+            let correctKey = TextNormalizer.normalize(TextNormalizer.stripMarkup(correct))
+            guard !correctKey.isEmpty, !candidateKey.isEmpty else { continue }
+            let correctMarkers = grammarMarkers(in: correct)
+            let sharedMarkers = candidateMarkers.intersection(correctMarkers).count
+            let markerScore = Double(sharedMarkers) * 8
+                + (!correctMarkers.isEmpty && candidateMarkers == correctMarkers ? 5 : 0)
+
+            let distance = levenshtein(candidateKey, correctKey)
+            let longest = max(max(candidateKey.count, correctKey.count), 1)
+            let spellingScore = max(0, 1 - Double(distance) / Double(longest)) * 10
+            let lengthScore = max(0, 1 - Double(abs(candidateKey.count - correctKey.count)) / Double(longest))
+            best = max(best, markerScore + spellingScore + lengthScore)
+        }
+        return best
+    }
+
+    private static func grammarMarkers(in surface: String) -> Set<String> {
+        let key = TextNormalizer.normalize(surface)
+        let markerGroups: [(String, [String])] = [
+            ("sich", ["sich"]),
+            ("dative-person", ["jdm", "jdm.", "jemandem"]),
+            ("accusative-person", ["jdn", "jdn.", "jemanden"]),
+            ("thing", ["etw", "etw.", "etwas"])
+        ]
+        return Set(markerGroups.compactMap { marker, spellings in
+            spellings.contains { key.range(of: $0) != nil } ? marker : nil
+        })
+    }
+
+    private static func levenshtein(_ lhs: String, _ rhs: String) -> Int {
+        let left = Array(lhs)
+        let right = Array(rhs)
+        if left.isEmpty { return right.count }
+        if right.isEmpty { return left.count }
+        var previous = Array(0...right.count)
+        var current = Array(repeating: 0, count: right.count + 1)
+        for leftIndex in 1...left.count {
+            current[0] = leftIndex
+            for rightIndex in 1...right.count {
+                let cost = left[leftIndex - 1] == right[rightIndex - 1] ? 0 : 1
+                current[rightIndex] = min(
+                    current[rightIndex - 1] + 1,
+                    previous[rightIndex] + 1,
+                    previous[rightIndex - 1] + cost
+                )
+            }
+            swap(&previous, &current)
+        }
+        return previous[right.count]
+    }
+
+    private static func interleave(_ pools: [[String]]) -> [String] {
+        var indices = Array(repeating: 0, count: pools.count)
+        var result: [String] = []
+        var addedValue = true
+        while addedValue {
+            addedValue = false
+            for poolIndex in pools.indices where indices[poolIndex] < pools[poolIndex].count {
+                result.append(pools[poolIndex][indices[poolIndex]])
+                indices[poolIndex] += 1
+                addedValue = true
+            }
+        }
+        return result
     }
 
     private func stripDisplayMarkup(_ s: String) -> String {

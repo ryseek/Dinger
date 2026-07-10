@@ -13,15 +13,29 @@ struct CardsRootView: View {
     @State private var showExportDeck = false
     @State private var exportFilename = "deck"
     @State private var exportDocument = DeckJSONDocument(data: Data())
+    @AppStorage("dailyReviewGoal") private var dailyGoal = 20
+    @AppStorage("studyCalendarCompact") private var isStudyCalendarCompact = false
 
     init(env: AppEnvironment) {
         self.env = env
-        _vm = State(wrappedValue: DeckListViewModel(service: env.cardService, pair: env.defaultPair))
+        _vm = State(wrappedValue: DeckListViewModel(
+            service: env.cardService,
+            database: env.database,
+            pair: env.defaultPair
+        ))
     }
 
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    StudyCalendarView(
+                        activity: vm.activity,
+                        dailyGoal: $dailyGoal,
+                        isCompact: $isStudyCalendarCompact
+                    )
+                        .listRowInsets(EdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12))
+                }
                 if vm.isAddingDeck {
                     Section {
                         VStack(alignment: .leading, spacing: 8) {
@@ -78,6 +92,10 @@ struct CardsRootView: View {
                     Section { Text(err).foregroundStyle(.red) }
                 }
             }
+            .animation(
+                .spring(response: 0.36, dampingFraction: 0.84),
+                value: isStudyCalendarCompact
+            )
             .navigationTitle("Decks")
             .toolbar {
                 ToolbarItemGroup(placement: .secondaryAction) {
@@ -134,6 +152,9 @@ struct CardsRootView: View {
                 }
             }
             .task { await vm.reload() }
+            .onAppear {
+                Task { await vm.reloadActivity() }
+            }
             .refreshable { await vm.reload() }
         }
     }

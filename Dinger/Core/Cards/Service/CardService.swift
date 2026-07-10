@@ -617,33 +617,49 @@ public nonisolated final class CardService: @unchecked Sendable {
     /// which would otherwise make it match *both* buckets — "due" is therefore
     /// restricted to cards with a non-null `last_reviewed_at`.
     public func reviewQueue(deck: Deck, now: Date = Date(), maxCards: Int = 100, maxNew: Int = 20) async throws -> [Card] {
-        guard let deckId = deck.id else { return [] }
+        try await reviewQueue(decks: [deck], now: now, maxCards: maxCards, maxNew: maxNew)
+    }
+
+    /// A single due/new queue spanning several decks. Limits are global, so
+    /// "20 new" means 20 across the session rather than 20 from every deck.
+    public func reviewQueue(decks: [Deck],
+                            now: Date = Date(),
+                            maxCards: Int = 100,
+                            maxNew: Int = 20) async throws -> [Card] {
+        let deckIds = decks.compactMap(\.id)
+        guard !deckIds.isEmpty else { return [] }
         return try await database.dbWriter.read { db in
-            let due = try Card.fetchAll(db, sql: """
-                SELECT c.* FROM card c
-                JOIN card_srs s ON s.card_id = c.id
-                WHERE c.deck_id = ?
-                  AND c.suspended = 0
-                  AND s.last_reviewed_at IS NOT NULL
-                  AND s.due_at <= ?
-                ORDER BY s.due_at ASC
-                LIMIT ?
-                """, arguments: [deckId, now, maxCards])
+            let duePools = try deckIds.map { deckId in
+                try Card.fetchAll(db, sql: """
+                    SELECT c.* FROM card c
+                    JOIN card_srs s ON s.card_id = c.id
+                    WHERE c.deck_id = ?
+                      AND c.suspended = 0
+                      AND s.last_reviewed_at IS NOT NULL
+                      AND s.due_at <= ?
+                    ORDER BY s.due_at ASC
+                    LIMIT ?
+                    """, arguments: [deckId, now, maxCards])
+            }
+            let due = Self.balancedShuffle(duePools, enabled: deckIds.count > 1)
 
             let remaining = max(0, maxCards - due.count)
-            if remaining == 0 { return due }
+            if remaining == 0 { return Array(due.prefix(maxCards)) }
             let newCap = min(remaining, maxNew)
-            let newCards = try Card.fetchAll(db, sql: """
-                SELECT c.* FROM card c
-                LEFT JOIN card_srs s ON s.card_id = c.id
-                WHERE c.deck_id = ?
-                  AND c.suspended = 0
-                  AND (s.card_id IS NULL OR s.last_reviewed_at IS NULL)
-                ORDER BY c.created_at DESC
-                LIMIT ?
-                """, arguments: [deckId, newCap])
+            let newPools = try deckIds.map { deckId in
+                try Card.fetchAll(db, sql: """
+                    SELECT c.* FROM card c
+                    LEFT JOIN card_srs s ON s.card_id = c.id
+                    WHERE c.deck_id = ?
+                      AND c.suspended = 0
+                      AND (s.card_id IS NULL OR s.last_reviewed_at IS NULL)
+                    ORDER BY c.created_at DESC
+                    LIMIT ?
+                    """, arguments: [deckId, newCap])
+            }
+            let newCards = Self.balancedShuffle(newPools, enabled: deckIds.count > 1)
 
-            return due + newCards
+            return Array(due.prefix(maxCards)) + Array(newCards.prefix(newCap))
         }
     }
 
@@ -651,17 +667,45 @@ public nonisolated final class CardService: @unchecked Sendable {
     /// "most overdue first" so genuinely-due cards still come up first and
     /// already-known cards fill the tail. Grading still writes SRS as usual.
     public func practiceQueue(deck: Deck, maxCards: Int = 100) async throws -> [Card] {
-        guard let deckId = deck.id else { return [] }
+        try await practiceQueue(decks: [deck], maxCards: maxCards)
+    }
+
+    public func practiceQueue(decks: [Deck], maxCards: Int = 100) async throws -> [Card] {
+        let deckIds = decks.compactMap(\.id)
+        guard !deckIds.isEmpty else { return [] }
         return try await database.dbWriter.read { db in
-            try Card.fetchAll(db, sql: """
-                SELECT c.* FROM card c
-                LEFT JOIN card_srs s ON s.card_id = c.id
-                WHERE c.deck_id = ? AND c.suspended = 0
-                ORDER BY
-                    CASE WHEN s.last_reviewed_at IS NULL THEN 0 ELSE 1 END ASC,
-                    COALESCE(s.due_at, c.created_at) ASC
-                LIMIT ?
-                """, arguments: [deckId, maxCards])
+            let pools = try deckIds.map { deckId in
+                try Card.fetchAll(db, sql: """
+                    SELECT c.* FROM card c
+                    LEFT JOIN card_srs s ON s.card_id = c.id
+                    WHERE c.deck_id = ? AND c.suspended = 0
+                    ORDER BY
+                        CASE WHEN s.last_reviewed_at IS NULL THEN 0 ELSE 1 END ASC,
+                        COALESCE(s.due_at, c.created_at) ASC
+                    LIMIT ?
+                    """, arguments: [deckId, maxCards])
+            }
+            return Array(Self.balancedShuffle(pools, enabled: deckIds.count > 1).prefix(maxCards))
         }
+    }
+
+    /// Randomizes within each deck, then deals one card from each deck per
+    /// round. This prevents a large/older deck from monopolizing All Decks.
+    private nonisolated static func balancedShuffle(_ queues: [[Card]], enabled: Bool) -> [Card] {
+        guard enabled else { return queues.first ?? [] }
+        var pools = queues.filter { !$0.isEmpty }.map { $0.shuffled() }
+        pools.shuffle()
+        var offsets = Array(repeating: 0, count: pools.count)
+        var result: [Card] = []
+        var addedCard = true
+        while addedCard {
+            addedCard = false
+            for index in pools.indices where offsets[index] < pools[index].count {
+                result.append(pools[index][offsets[index]])
+                offsets[index] += 1
+                addedCard = true
+            }
+        }
+        return result
     }
 }
