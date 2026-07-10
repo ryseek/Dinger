@@ -6,7 +6,21 @@
 
 Dinger is a small SwiftUI German-English dictionary and study app with cards, quizzes, and spaced repetition.
 
+Decks can be exported individually or backed up together from the Decks tab. Both formats include card selections, suspension state, the complete spaced-repetition schedule, and review history. The same import action accepts individual deck exports and all-decks backups.
+
 The generated SQLite dictionary database is intentionally excluded from git. The source dictionary file in `resources/` is kept compressed as `.gz`.
+
+## Tests
+
+Run the iOS app unit tests on an installed simulator:
+
+```sh
+xcodebuild -project Dinger.xcodeproj -scheme Dinger \
+  -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5' \
+  CODE_SIGNING_ALLOWED=NO test
+```
+
+Run the dictionary importer tests with `swift test` from `Tools/DictImporter`.
 
 ## Credits
 

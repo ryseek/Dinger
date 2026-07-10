@@ -8,16 +8,33 @@
 
 /* Begin PBXBuildFile section */
 		AA33333333333333333333AA /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = AA22222222222222222222AA /* GRDB */; };
+		CC000000000000000000000C /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = AA22222222222222222222AA /* GRDB */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		CC000000000000000000000A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B99555312F9698BF00CC9867 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B99555382F9698BF00CC9867;
+			remoteInfo = Dinger;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		B99555392F9698BF00CC9867 /* Dinger.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Dinger.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		CC0000000000000000000001 /* DingerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DingerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		B995553B2F9698BF00CC9867 /* Dinger */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = Dinger;
+			sourceTree = "<group>";
+		};
+		CC0000000000000000000002 /* DingerTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = DingerTests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -31,6 +48,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		CC0000000000000000000003 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CC000000000000000000000C /* GRDB in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -38,6 +63,7 @@
 			isa = PBXGroup;
 			children = (
 				B995553B2F9698BF00CC9867 /* Dinger */,
+				CC0000000000000000000002 /* DingerTests */,
 				B995553A2F9698BF00CC9867 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -46,6 +72,7 @@
 			isa = PBXGroup;
 			children = (
 				B99555392F9698BF00CC9867 /* Dinger.app */,
+				CC0000000000000000000001 /* DingerTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -76,6 +103,30 @@
 			productReference = B99555392F9698BF00CC9867 /* Dinger.app */;
 			productType = "com.apple.product-type.application";
 		};
+		CC0000000000000000000006 /* DingerTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CC0000000000000000000007 /* Build configuration list for PBXNativeTarget "DingerTests" */;
+			buildPhases = (
+				CC0000000000000000000005 /* Sources */,
+				CC0000000000000000000003 /* Frameworks */,
+				CC0000000000000000000004 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				CC000000000000000000000B /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				CC0000000000000000000002 /* DingerTests */,
+			);
+			name = DingerTests;
+			packageProductDependencies = (
+				AA22222222222222222222AA /* GRDB */,
+			);
+			productName = DingerTests;
+			productReference = CC0000000000000000000001 /* DingerTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -88,6 +139,10 @@
 				TargetAttributes = {
 					B99555382F9698BF00CC9867 = {
 						CreatedOnToolsVersion = 26.4.1;
+					};
+					CC0000000000000000000006 = {
+						CreatedOnToolsVersion = 26.4.1;
+						TestTargetID = B99555382F9698BF00CC9867;
 					};
 				};
 			};
@@ -109,12 +164,20 @@
 			projectRoot = "";
 			targets = (
 				B99555382F9698BF00CC9867 /* Dinger */,
+				CC0000000000000000000006 /* DingerTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		B99555372F9698BF00CC9867 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CC0000000000000000000004 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -131,7 +194,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		CC0000000000000000000005 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		CC000000000000000000000B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B99555382F9698BF00CC9867 /* Dinger */;
+			targetProxy = CC000000000000000000000A /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		B99555422F9698C000CC9867 /* Debug */ = {
@@ -338,6 +416,50 @@
 			};
 			name = Release;
 		};
+		CC0000000000000000000008 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = BX4VPQDKU9;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ryseek.DingerTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Dinger.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Dinger";
+			};
+			name = Debug;
+		};
+		CC0000000000000000000009 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = BX4VPQDKU9;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ryseek.DingerTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Dinger.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Dinger";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -355,6 +477,15 @@
 			buildConfigurations = (
 				B99555452F9698C000CC9867 /* Debug */,
 				B99555462F9698C000CC9867 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		CC0000000000000000000007 /* Build configuration list for PBXNativeTarget "DingerTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CC0000000000000000000008 /* Debug */,
+				CC0000000000000000000009 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

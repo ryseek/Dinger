@@ -96,17 +96,18 @@ public nonisolated final class DictionarySearchService: @unchecked Sendable {
             // If the query exists as a term in the source language, prefer source→target;
             // if it exists in target, prefer target→source; otherwise no restriction.
             return try await reader.read { db in
+                let prefix = Self.likeEscape(normalized) + "%"
                 let srcCount = try Int.fetchOne(db, sql: """
                     SELECT COUNT(*) FROM term
-                    WHERE language_id = ? AND (normalized = ? OR normalized LIKE ?)
+                    WHERE language_id = ? AND (normalized = ? OR normalized LIKE ? ESCAPE '^')
                     LIMIT 1
-                """, arguments: [languageIds.source, normalized, normalized + "%"]) ?? 0
+                """, arguments: [languageIds.source, normalized, prefix]) ?? 0
                 if srcCount > 0 { return languageIds.source }
                 let tgtCount = try Int.fetchOne(db, sql: """
                     SELECT COUNT(*) FROM term
-                    WHERE language_id = ? AND (normalized = ? OR normalized LIKE ?)
+                    WHERE language_id = ? AND (normalized = ? OR normalized LIKE ? ESCAPE '^')
                     LIMIT 1
-                """, arguments: [languageIds.target, normalized, normalized + "%"]) ?? 0
+                """, arguments: [languageIds.target, normalized, prefix]) ?? 0
                 if tgtCount > 0 { return languageIds.target }
                 return nil
             }
@@ -133,9 +134,12 @@ public nonisolated final class DictionarySearchService: @unchecked Sendable {
                                       pair: LanguagePair,
                                       languageIds: LanguageIds) throws -> [SenseHit] {
         let ftsEscaped = ftsEscape(normalized)
-        let ftsPrefixQuery = "\"\(ftsEscaped)\" * OR \(ftsEscaped)*"
-        let likePrefix = normalized + "%"
-        let likeAny = "%" + normalized + "%"
+        let ftsPrefixQuery = "\"\(ftsEscaped)\"*"
+        let ftsAllowedCharacters = CharacterSet.alphanumerics.union(.whitespaces)
+        let ftsEnabled = normalized.unicodeScalars.allSatisfy { ftsAllowedCharacters.contains($0) }
+        let likeEscaped = likeEscape(normalized)
+        let likePrefix = likeEscaped + "%"
+        let likeAny = "%" + likeEscaped + "%"
 
         var langClause = ""
         var langArg: [DatabaseValueConvertible] = []
@@ -156,7 +160,7 @@ public nonisolated final class DictionarySearchService: @unchecked Sendable {
 
             SELECT t.id, t.sense_id, t.language_id, 1, LENGTH(t.headword)
               FROM term t
-             WHERE t.normalized LIKE ?
+             WHERE t.normalized LIKE ? ESCAPE '^'
                AND t.normalized <> ?\(langClause)
 
             UNION ALL
@@ -164,14 +168,14 @@ public nonisolated final class DictionarySearchService: @unchecked Sendable {
             SELECT t.id, t.sense_id, t.language_id, 2, LENGTH(t.headword)
               FROM term t
               JOIN term_fts f ON f.rowid = t.id
-             WHERE term_fts MATCH ?\(langClause)
+             WHERE ? AND term_fts MATCH ?\(langClause)
 
             UNION ALL
 
             SELECT t.id, t.sense_id, t.language_id, 3, LENGTH(t.headword)
               FROM term t
-             WHERE t.normalized LIKE ?
-               AND t.normalized NOT LIKE ?\(langClause)
+             WHERE t.normalized LIKE ? ESCAPE '^'
+               AND t.normalized NOT LIKE ? ESCAPE '^'\(langClause)
         ),
         best_per_sense AS (
             SELECT sense_id,
@@ -197,6 +201,7 @@ public nonisolated final class DictionarySearchService: @unchecked Sendable {
         args.append(likePrefix)
         args.append(normalized)
         args.append(contentsOf: langArg)
+        args.append(ftsEnabled)
         args.append(ftsPrefixQuery)
         args.append(contentsOf: langArg)
         args.append(likeAny)
@@ -290,6 +295,14 @@ public nonisolated final class DictionarySearchService: @unchecked Sendable {
     /// Escape characters that have special meaning in FTS5 MATCH expressions.
     private static func ftsEscape(_ s: String) -> String {
         s.replacingOccurrences(of: "\"", with: "\"\"")
+    }
+
+    /// Escape SQL LIKE metacharacters so dictionary queries are always treated
+    /// as literal text rather than patterns supplied by the user.
+    private static func likeEscape(_ s: String) -> String {
+        s.replacingOccurrences(of: "^", with: "^^")
+            .replacingOccurrences(of: "%", with: "^%")
+            .replacingOccurrences(of: "_", with: "^_")
     }
 }
 
