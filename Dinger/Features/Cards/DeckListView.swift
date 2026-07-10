@@ -80,11 +80,16 @@ struct CardsRootView: View {
             }
             .navigationTitle("Decks")
             .toolbar {
-                ToolbarItem(placement: .secondaryAction) {
+                ToolbarItemGroup(placement: .secondaryAction) {
                     Button {
                         showImportDeck = true
                     } label: {
-                        Label("Import Deck...", systemImage: "square.and.arrow.down")
+                        Label("Import Deck or Backup...", systemImage: "square.and.arrow.down")
+                    }
+                    Button {
+                        exportAllDecks()
+                    } label: {
+                        Label("Export All Decks", systemImage: "archivebox")
                     }
                 }
                 ToolbarItem(placement: .primaryAction) {
@@ -153,6 +158,15 @@ struct CardsRootView: View {
             guard let data = await vm.export(deck) else { return }
             exportDocument = DeckJSONDocument(data: data)
             exportFilename = exportFileName(for: deck)
+            showExportDeck = true
+        }
+    }
+
+    private func exportAllDecks() {
+        Task {
+            guard let data = await vm.exportAllDecks() else { return }
+            exportDocument = DeckJSONDocument(data: data)
+            exportFilename = "dinger-all-decks-backup"
             showExportDeck = true
         }
     }

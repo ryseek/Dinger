@@ -97,103 +97,139 @@ public nonisolated final class CardService: @unchecked Sendable {
     }
 
     public func exportDeck(_ deck: Deck) async throws -> Data {
-        guard let deckId = deck.id else { throw CardServiceError.invalidDeckFile }
+        guard deck.id != nil else { throw CardServiceError.invalidDeckFile }
         let export = try await database.dbWriter.read { db in
-            let cards = try Card.filter(Column("deck_id") == deckId)
-                .order(Column("created_at").asc)
-                .fetchAll(db)
-            let exportedCards = try cards.map { try Self.exportedCard(db: db, deck: deck, card: $0) }
-            return DeckExportFile(
-                deck: ExportedDeck(
-                    name: deck.name,
-                    sourceLang: deck.sourceLang,
-                    targetLang: deck.targetLang
-                ),
-                cards: exportedCards
-            )
+            try Self.exportedDeck(db: db, deck: deck)
         }
 
+        return try Self.encodeExport(export)
+    }
+
+    public func exportAllDecks() async throws -> Data {
+        let export = try await database.dbWriter.read { db in
+            let decks = try Deck.order(Column("created_at").asc).fetchAll(db)
+            return AllDecksExportFile(decks: try decks.map { try Self.exportedDeck(db: db, deck: $0) })
+        }
+
+        return try Self.encodeExport(export)
+    }
+
+    private nonisolated static func encodeExport<T: Encodable>(_ export: T) throws -> Data {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return try encoder.encode(export)
     }
 
-    public func importDeck(from data: Data, progress: (@Sendable (Double) -> Void)? = nil) async throws -> Deck {
+    public func importDecks(from data: Data, progress: (@Sendable (Double) -> Void)? = nil) async throws -> [Deck] {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
 
-        let export: DeckExportFile
-        do {
-            export = try decoder.decode(DeckExportFile.self, from: data)
-        } catch {
+        let exports: [DeckExportFile]
+        if let backup = try? decoder.decode(AllDecksExportFile.self, from: data),
+           backup.format == AllDecksExportFormat.current {
+            exports = backup.decks
+        } else if let deck = try? decoder.decode(DeckExportFile.self, from: data),
+                  deck.format == DeckExportFormat.current {
+            exports = [deck]
+        } else {
+            let format = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["format"] as? String
+            if let format {
+                throw CardServiceError.unsupportedDeckFileFormat(format)
+            }
             throw CardServiceError.invalidDeckFile
         }
 
+        progress?(0)
+        let totalCards = exports.reduce(0) { $0 + $1.cards.count }
+
+        return try await database.dbWriter.write { db in
+            var importedCards = 0
+            var importedDecks: [Deck] = []
+            for export in exports {
+                let deck = try Self.importDeck(export, db: db) {
+                    importedCards += 1
+                    if totalCards > 0 {
+                        progress?(Double(importedCards) / Double(totalCards))
+                    }
+                }
+                importedDecks.append(deck)
+            }
+            if totalCards == 0 { progress?(1) }
+            return importedDecks
+        }
+    }
+
+    public func importDeck(from data: Data, progress: (@Sendable (Double) -> Void)? = nil) async throws -> Deck {
+        let decks = try await importDecks(from: data, progress: progress)
+        guard decks.count == 1, let deck = decks.first else { throw CardServiceError.invalidDeckFile }
+        return deck
+    }
+
+    private nonisolated static func importDeck(_ export: DeckExportFile,
+                                                db: Database,
+                                                cardImported: () -> Void) throws -> Deck {
         guard export.format == DeckExportFormat.current else {
             throw CardServiceError.unsupportedDeckFileFormat(export.format)
         }
-
         let deckName = export.deck.name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !deckName.isEmpty else { throw CardServiceError.invalidDeckName }
         guard !export.deck.sourceLang.isEmpty, !export.deck.targetLang.isEmpty else {
             throw CardServiceError.invalidDeckFile
         }
-        progress?(0)
-
-        return try await database.dbWriter.write { db in
-            guard try Self.hasDictionary(db: db, sourceLang: export.deck.sourceLang, targetLang: export.deck.targetLang) else {
-                throw CardServiceError.unresolvedDeckCard("\(export.deck.sourceLang)-\(export.deck.targetLang)")
-            }
-
-            var deck = Deck(
-                name: deckName,
-                sourceLang: export.deck.sourceLang,
-                targetLang: export.deck.targetLang
-            )
-            try deck.insert(db)
-            guard let deckId = deck.id else { throw CardServiceError.invalidDeckFile }
-
-            let totalCards = export.cards.count
-            if totalCards == 0 {
-                progress?(1)
-            }
-
-            for (index, exportedCard) in export.cards.enumerated() {
-                let senseId = try Self.resolveSenseId(db: db, key: exportedCard.senseKey)
-                let frontTermIds = try Self.resolveTermIds(
-                    db: db,
-                    terms: exportedCard.frontTerms,
-                    senseId: senseId
-                )
-                let backTermIds = try Self.resolveTermIds(
-                    db: db,
-                    terms: exportedCard.backTerms,
-                    senseId: senseId
-                )
-                guard let frontTermId = frontTermIds.first,
-                      let backTermId = backTermIds.first else {
-                    throw CardServiceError.invalidDeckFile
-                }
-
-                var card = Card(
-                    deckId: deckId,
-                    senseId: senseId,
-                    frontTermId: frontTermId,
-                    backTermId: backTermId,
-                    frontTermIds: frontTermIds,
-                    backTermIds: backTermIds,
-                    direction: exportedCard.direction,
-                    createdAt: exportedCard.createdAt,
-                    suspended: exportedCard.suspended
-                )
-                try card.insert(db)
-                try CardSRS(cardId: card.id!).insert(db)
-                progress?(Double(index + 1) / Double(totalCards))
-            }
-
-            return deck
+        guard try hasDictionary(db: db, sourceLang: export.deck.sourceLang, targetLang: export.deck.targetLang) else {
+            throw CardServiceError.unresolvedDeckCard("\(export.deck.sourceLang)-\(export.deck.targetLang)")
         }
+
+        var deck = Deck(name: deckName,
+                        sourceLang: export.deck.sourceLang,
+                        targetLang: export.deck.targetLang)
+        try deck.insert(db)
+        guard let deckId = deck.id else { throw CardServiceError.invalidDeckFile }
+
+        for exportedCard in export.cards {
+            let senseId = try resolveSenseId(db: db, key: exportedCard.senseKey)
+            let frontTermIds = try resolveTermIds(db: db, terms: exportedCard.frontTerms, senseId: senseId)
+            let backTermIds = try resolveTermIds(db: db, terms: exportedCard.backTerms, senseId: senseId)
+            guard let frontTermId = frontTermIds.first, let backTermId = backTermIds.first else {
+                throw CardServiceError.invalidDeckFile
+            }
+
+            try validate(exportedCard)
+            var card = Card(deckId: deckId,
+                            senseId: senseId,
+                            frontTermId: frontTermId,
+                            backTermId: backTermId,
+                            frontTermIds: frontTermIds,
+                            backTermIds: backTermIds,
+                            direction: exportedCard.direction,
+                            createdAt: exportedCard.createdAt,
+                            suspended: exportedCard.suspended)
+            try card.insert(db)
+            guard let cardId = card.id else { throw CardServiceError.invalidDeckFile }
+
+            let srs = exportedCard.srs
+            try CardSRS(cardId: cardId,
+                        ease: srs.ease,
+                        intervalDays: srs.intervalDays,
+                        repetitions: srs.repetitions,
+                        lapses: srs.lapses,
+                        dueAt: srs.dueAt,
+                        lastReviewedAt: srs.lastReviewedAt).insert(db)
+            for review in exportedCard.reviewHistory {
+                var log = ReviewLog(cardId: cardId,
+                                    reviewedAt: review.reviewedAt,
+                                    grade: review.grade,
+                                    prevInterval: review.prevInterval,
+                                    newInterval: review.newInterval,
+                                    prevEase: review.prevEase,
+                                    newEase: review.newEase)
+                try log.insert(db)
+            }
+            cardImported()
+        }
+
+        return deck
     }
 
     // MARK: - Cards
@@ -298,7 +334,23 @@ public nonisolated final class CardService: @unchecked Sendable {
         return selected
     }
 
+    private nonisolated static func exportedDeck(db: Database, deck: Deck) throws -> DeckExportFile {
+        guard let deckId = deck.id else { throw CardServiceError.invalidDeckFile }
+        let cards = try Card.filter(Column("deck_id") == deckId)
+            .order(Column("created_at").asc)
+            .fetchAll(db)
+        return DeckExportFile(
+            deck: ExportedDeck(
+                name: deck.name,
+                sourceLang: deck.sourceLang,
+                targetLang: deck.targetLang
+            ),
+            cards: try cards.map { try exportedCard(db: db, deck: deck, card: $0) }
+        )
+    }
+
     private nonisolated static func exportedCard(db: Database, deck: Deck, card: Card) throws -> ExportedCard {
+        guard let cardId = card.id else { throw CardServiceError.invalidDeckFile }
         guard let senseRow = try Row.fetchOne(db, sql: """
             SELECT e.raw AS entry_raw, s.position AS sense_position
               FROM sense s
@@ -314,6 +366,11 @@ public nonisolated final class CardService: @unchecked Sendable {
             entryRaw: senseRow["entry_raw"],
             sensePosition: senseRow["sense_position"]
         )
+        let storedSRS = try CardSRS.fetchOne(db, key: cardId) ?? CardSRS(cardId: cardId)
+        let reviewLogs = try ReviewLog
+            .filter(Column("card_id") == cardId)
+            .order(Column("reviewed_at").asc, Column("id").asc)
+            .fetchAll(db)
 
         return ExportedCard(
             senseKey: senseKey,
@@ -321,8 +378,51 @@ public nonisolated final class CardService: @unchecked Sendable {
             frontTerms: try exportedTerms(db: db, senseId: card.senseId, termIds: card.frontTermIds),
             backTerms: try exportedTerms(db: db, senseId: card.senseId, termIds: card.backTermIds),
             suspended: card.suspended,
-            createdAt: card.createdAt
+            createdAt: card.createdAt,
+            srs: ExportedCardSRS(
+                ease: storedSRS.ease,
+                intervalDays: storedSRS.intervalDays,
+                repetitions: storedSRS.repetitions,
+                lapses: storedSRS.lapses,
+                dueAt: storedSRS.dueAt,
+                lastReviewedAt: storedSRS.lastReviewedAt
+            ),
+            reviewHistory: reviewLogs.map {
+                ExportedReview(
+                    reviewedAt: $0.reviewedAt,
+                    grade: $0.grade,
+                    prevInterval: $0.prevInterval,
+                    newInterval: $0.newInterval,
+                    prevEase: $0.prevEase,
+                    newEase: $0.newEase
+                )
+            }
         )
+    }
+
+    private nonisolated static func validate(_ card: ExportedCard) throws {
+        let srs = card.srs
+        guard srs.ease.isFinite,
+              srs.intervalDays.isFinite,
+              srs.ease >= SM2Scheduler.minEase,
+              srs.intervalDays >= 0,
+              srs.repetitions >= 0,
+              srs.lapses >= 0 else {
+            throw CardServiceError.invalidDeckFile
+        }
+        for review in card.reviewHistory {
+            guard Grade(rawValue: review.grade) != nil,
+                  review.prevInterval.isFinite,
+                  review.newInterval.isFinite,
+                  review.prevEase.isFinite,
+                  review.newEase.isFinite,
+                  review.prevInterval >= 0,
+                  review.newInterval >= 0,
+                  review.prevEase >= SM2Scheduler.minEase,
+                  review.newEase >= SM2Scheduler.minEase else {
+                throw CardServiceError.invalidDeckFile
+            }
+        }
     }
 
     private nonisolated static func exportedTerms(db: Database, senseId: Int64, termIds: [Int64]) throws -> [ExportedTerm] {

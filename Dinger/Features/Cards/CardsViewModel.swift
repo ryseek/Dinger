@@ -59,11 +59,22 @@ public final class DeckListViewModel {
         }
     }
 
+    public func exportAllDecks() async -> Data? {
+        do {
+            let data = try await service.exportAllDecks()
+            error = nil
+            return data
+        } catch {
+            self.error = error.localizedDescription
+            return nil
+        }
+    }
+
     public func importDeck(data: Data) async {
-        beginDeckAdd(status: "Importing deck...", progress: 0)
+        beginDeckAdd(status: "Importing deck or backup...", progress: 0)
         defer { finishDeckAdd() }
         do {
-            _ = try await service.importDeck(from: data) { [weak self] progress in
+            _ = try await service.importDecks(from: data) { [weak self] progress in
                 Task { @MainActor in
                     self?.deckAddProgress = progress
                 }

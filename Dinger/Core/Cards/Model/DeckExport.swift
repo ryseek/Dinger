@@ -1,7 +1,25 @@
 import Foundation
 
 public nonisolated enum DeckExportFormat {
-    public static let current = "dinger.deck.v1"
+    public static let current = "dinger.deck.v2"
+}
+
+public nonisolated enum AllDecksExportFormat {
+    public static let current = "dinger.backup.v1"
+}
+
+public nonisolated struct AllDecksExportFile: Codable, Hashable, Sendable {
+    public var format: String
+    public var exportedAt: Date
+    public var decks: [DeckExportFile]
+
+    public init(format: String = AllDecksExportFormat.current,
+                exportedAt: Date = Date(),
+                decks: [DeckExportFile]) {
+        self.format = format
+        self.exportedAt = exportedAt
+        self.decks = decks
+    }
 }
 
 public nonisolated struct DeckExportFile: Codable, Hashable, Sendable {
@@ -40,19 +58,71 @@ public nonisolated struct ExportedCard: Codable, Hashable, Sendable {
     public var backTerms: [ExportedTerm]
     public var suspended: Bool
     public var createdAt: Date
+    public var srs: ExportedCardSRS
+    public var reviewHistory: [ExportedReview]
 
     public init(senseKey: ExportedSenseKey,
                 direction: CardDirection,
                 frontTerms: [ExportedTerm],
                 backTerms: [ExportedTerm],
                 suspended: Bool,
-                createdAt: Date) {
+                createdAt: Date,
+                srs: ExportedCardSRS,
+                reviewHistory: [ExportedReview]) {
         self.senseKey = senseKey
         self.direction = direction
         self.frontTerms = frontTerms
         self.backTerms = backTerms
         self.suspended = suspended
         self.createdAt = createdAt
+        self.srs = srs
+        self.reviewHistory = reviewHistory
+    }
+}
+
+public nonisolated struct ExportedCardSRS: Codable, Hashable, Sendable {
+    public var ease: Double
+    public var intervalDays: Double
+    public var repetitions: Int
+    public var lapses: Int
+    public var dueAt: Date
+    public var lastReviewedAt: Date?
+
+    public init(ease: Double,
+                intervalDays: Double,
+                repetitions: Int,
+                lapses: Int,
+                dueAt: Date,
+                lastReviewedAt: Date?) {
+        self.ease = ease
+        self.intervalDays = intervalDays
+        self.repetitions = repetitions
+        self.lapses = lapses
+        self.dueAt = dueAt
+        self.lastReviewedAt = lastReviewedAt
+    }
+}
+
+public nonisolated struct ExportedReview: Codable, Hashable, Sendable {
+    public var reviewedAt: Date
+    public var grade: Int
+    public var prevInterval: Double
+    public var newInterval: Double
+    public var prevEase: Double
+    public var newEase: Double
+
+    public init(reviewedAt: Date,
+                grade: Int,
+                prevInterval: Double,
+                newInterval: Double,
+                prevEase: Double,
+                newEase: Double) {
+        self.reviewedAt = reviewedAt
+        self.grade = grade
+        self.prevInterval = prevInterval
+        self.newInterval = newInterval
+        self.prevEase = prevEase
+        self.newEase = newEase
     }
 }
 
