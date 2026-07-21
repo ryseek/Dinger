@@ -6,6 +6,7 @@ public nonisolated enum CardServiceError: Error, LocalizedError, Sendable {
     case noFrontTerm
     case senseNotFound
     case duplicateAfterInvert
+    case duplicateAfterReplacement
     case selectedTermNotFound
     case invalidDeckName
     case invalidDeckFile
@@ -18,6 +19,8 @@ public nonisolated enum CardServiceError: Error, LocalizedError, Sendable {
         case .noFrontTerm:           return "This sense has no term on the front side."
         case .senseNotFound:         return "Sense not found."
         case .duplicateAfterInvert:  return "A card with the opposite direction already exists in this deck."
+        case .duplicateAfterReplacement:
+            return "That meaning is already a card in this deck."
         case .selectedTermNotFound:  return "The selected translation is no longer available."
         case .invalidDeckName:       return "Deck name can't be empty."
         case .invalidDeckFile:       return "This deck file is malformed or incomplete."
@@ -33,6 +36,10 @@ public nonisolated struct CardCreationResult: Sendable {
     public let card: Card
     public let isNew: Bool
     public let didUpdate: Bool
+}
+
+public nonisolated struct CardReplacementResult: Sendable {
+    public let card: Card
 }
 
 /// Deck + card + SRS management. All methods dispatch onto GRDB's writer queue.
@@ -332,6 +339,53 @@ public nonisolated final class CardService: @unchecked Sendable {
             throw CardServiceError.selectedTermNotFound
         }
         return selected
+    }
+
+    /// Repoint an existing card at a better dictionary sense without replacing
+    /// the card row. Keeping its id preserves the SRS row and review history.
+    public func replaceCard(_ card: Card,
+                            with hit: SenseHit,
+                            selectedSourceTermId: Int64? = nil,
+                            selectedTargetTermId: Int64? = nil) async throws -> CardReplacementResult {
+        guard let cardId = card.id else { throw CardServiceError.senseNotFound }
+        let (front, back) = try Self.pickFrontBack(
+            hit: hit,
+            direction: card.direction,
+            selectedSourceTermIds: selectedSourceTermId.map { [$0] },
+            selectedTargetTermIds: selectedTargetTermId.map { [$0] }
+        )
+
+        return try await database.dbWriter.write { db in
+            if try Card
+                .filter(Column("deck_id") == card.deckId)
+                .filter(Column("sense_id") == hit.senseId)
+                .filter(Column("direction") == card.direction.rawValue)
+                .filter(Column("id") != cardId)
+                .fetchCount(db) > 0 {
+                throw CardServiceError.duplicateAfterReplacement
+            }
+            try db.execute(sql: """
+                UPDATE card
+                   SET sense_id = ?,
+                       front_term_id = ?,
+                       back_term_id = ?,
+                       front_term_ids = ?,
+                       back_term_ids = ?
+                 WHERE id = ?
+                """, arguments: [
+                    hit.senseId,
+                    front[0].termId,
+                    back[0].termId,
+                    Card.encodeTermIds(front.map(\.termId)),
+                    Card.encodeTermIds(back.map(\.termId)),
+                    cardId
+                ])
+            guard var updated = try Card.fetchOne(db, key: cardId) else {
+                throw CardServiceError.senseNotFound
+            }
+            updated.id = cardId
+            return CardReplacementResult(card: updated)
+        }
     }
 
     private nonisolated static func exportedDeck(db: Database, deck: Deck) throws -> DeckExportFile {

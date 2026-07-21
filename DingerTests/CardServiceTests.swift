@@ -3,6 +3,44 @@ import XCTest
 @testable import Dinger
 
 final class CardServiceTests: XCTestCase {
+    func testReplacingCardSensePreservesIdentityAndProgress() async throws {
+        let database = try await TestDatabaseSupport.makeDatabase()
+        let service = CardService(database: database)
+        let deck = try await service.createDeck(name: "Study", pair: .deEN)
+        let original = try await TestDatabaseSupport.card("Haus", deck: deck, service: service, database: database)
+        _ = try await service.grade(
+            card: original,
+            grade: .good,
+            now: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        try await database.dbWriter.write { db in
+            try db.execute(sql: """
+                INSERT INTO term (id, sense_id, language_id, surface, headword, normalized)
+                VALUES (43, 2, 2, 'wood', 'wood', 'wood')
+                """)
+        }
+
+        let replacementHit = try await TestDatabaseSupport.hit("Baum", database: database)
+        let replacement = try await service.replaceCard(
+            original,
+            with: replacementHit,
+            selectedSourceTermId: 3,
+            selectedTargetTermId: 43
+        ).card
+
+        XCTAssertEqual(replacement.id, original.id)
+        XCTAssertEqual(replacement.senseId, replacementHit.senseId)
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let export = try decoder.decode(DeckExportFile.self, from: try await service.exportDeck(deck))
+        let exportedCard = try XCTUnwrap(export.cards.first)
+        XCTAssertEqual(exportedCard.frontTerms.first?.headword, "Baum")
+        XCTAssertEqual(exportedCard.backTerms.first?.headword, "wood")
+        XCTAssertEqual(exportedCard.srs.repetitions, 1)
+        XCTAssertEqual(exportedCard.reviewHistory.count, 1)
+    }
+
     func testGradingUpdatesSRSAndCreatesReviewHistory() async throws {
         let database = try await TestDatabaseSupport.makeDatabase()
         let service = CardService(database: database)
@@ -135,5 +173,10 @@ final class CardServiceTests: XCTestCase {
         XCTAssertEqual(viewModel.activity.activity(on: now)?.correctCount, 0)
         XCTAssertEqual(viewModel.activity.activity(on: yesterday)?.reviewCount, 1)
         XCTAssertEqual(viewModel.activity.currentStreak, 2)
+        XCTAssertEqual(viewModel.activity.activity(on: yesterday)?.words.first?.front, "Haus {n}")
+        XCTAssertEqual(viewModel.activity.activity(on: yesterday)?.words.first?.isNew, true)
+        XCTAssertEqual(viewModel.activity.activity(on: now)?.words.first?.isNew, false)
+        XCTAssertEqual(viewModel.activity.activity(on: yesterday)?.words.first?.failedReviewCount, 0)
+        XCTAssertEqual(viewModel.activity.activity(on: now)?.words.first?.failedReviewCount, 1)
     }
 }

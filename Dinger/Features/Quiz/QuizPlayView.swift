@@ -9,6 +9,7 @@ struct QuizPlayView: View {
     @State private var revealOffset: CGFloat = 0
     @State private var revealOpacity: Double = 1
     @State private var isDismissingReveal = false
+    @State private var cardToFix: Question?
     @Environment(\.dismiss) private var dismiss
 
     init(env: AppEnvironment, decks: [Deck], config: QuizConfig) {
@@ -41,6 +42,15 @@ struct QuizPlayView: View {
                 }
             }
             .task { await vm.start() }
+            .sheet(item: $cardToFix) { question in
+                FixQuizCardSheet(env: env, question: question) { hit, sourceTermId, targetTermId in
+                    await vm.replaceCurrentCard(
+                        with: hit,
+                        selectedSourceTermId: sourceTermId,
+                        selectedTargetTermId: targetTermId
+                    )
+                }
+            }
         }
     }
 
@@ -185,6 +195,27 @@ struct QuizPlayView: View {
                 }
                 .shadow(color: .black.opacity(0.12), radius: 16, y: 8)
 
+                VStack {
+                    HStack {
+                        Spacer()
+                        Menu {
+                            Button {
+                                cardToFix = q
+                            } label: {
+                                Label("Fix card", systemImage: "wrench.and.screwdriver")
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis")
+                                .font(.headline)
+                                .frame(width: 36, height: 36)
+                                .background(.thinMaterial, in: Circle())
+                        }
+                        .accessibilityLabel("Card actions")
+                    }
+                    Spacer()
+                }
+                .padding(14)
+
                 swipeFeedback(gotItDisabled: gotItDisabled)
             }
             .offset(x: revealOffset)
@@ -314,5 +345,158 @@ struct QuizPlayView: View {
                 .padding(.top)
         }
         .padding()
+    }
+}
+
+private struct FixQuizCardSheet: View {
+    let env: AppEnvironment
+    let question: Question
+    let onSelect: (SenseHit, Int64, Int64) async -> Void
+
+    @State private var query: String
+    @State private var results: [SenseHit] = []
+    @State private var isSearching = false
+    @State private var error: String?
+    @Environment(\.dismiss) private var dismiss
+
+    init(env: AppEnvironment,
+         question: Question,
+         onSelect: @escaping (SenseHit, Int64, Int64) async -> Void) {
+        self.env = env
+        self.question = question
+        self.onSelect = onSelect
+        _query = State(initialValue: Self.searchText(from: question.displayFronts.first ?? question.front))
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if isSearching && results.isEmpty {
+                    ProgressView("Finding meanings…")
+                } else if let error, results.isEmpty {
+                    ContentUnavailableView("Search failed", systemImage: "exclamationmark.triangle", description: Text(error))
+                } else if results.isEmpty {
+                    ContentUnavailableView.search(text: query)
+                } else {
+                    List(results) { hit in
+                        NavigationLink {
+                            FixQuizCardTermPicker(hit: hit) { sourceTermId, targetTermId in
+                                await onSelect(hit, sourceTermId, targetTermId)
+                                dismiss()
+                            }
+                        } label: {
+                            SenseRowView(hit: hit)
+                        }
+                    }
+                    .listStyle(.plain)
+                }
+            }
+            .navigationTitle("Fix card")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $query, prompt: "Search dictionary")
+            .onChange(of: query) { _, _ in search() }
+            .task { search() }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func search() {
+        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            results = []
+            return
+        }
+        Task {
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled, text == query.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
+            isSearching = true
+            defer { isSearching = false }
+            do {
+                let options = DictionarySearchService.SearchOptions(limit: 80, direction: .auto, pair: env.defaultPair)
+                results = try await env.searchService.search(text, options: options)
+                error = nil
+            } catch {
+                self.error = error.localizedDescription
+            }
+        }
+    }
+
+    private static func searchText(from surface: String) -> String {
+        surface
+            .replacingOccurrences(of: #"\s*\{[^}]+\}"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+private struct FixQuizCardTermPicker: View {
+    let hit: SenseHit
+    let onApply: (Int64, Int64) async -> Void
+
+    @State private var selectedSourceTermId: Int64
+    @State private var selectedTargetTermId: Int64
+    @State private var isApplying = false
+
+    init(hit: SenseHit, onApply: @escaping (Int64, Int64) async -> Void) {
+        self.hit = hit
+        self.onApply = onApply
+        let matchedSource = hit.sourceTerms.first { $0.termId == hit.matchedTermId }?.termId
+        let matchedTarget = hit.targetTerms.first { $0.termId == hit.matchedTermId }?.termId
+        _selectedSourceTermId = State(initialValue: matchedSource ?? hit.sourceTerms.first?.termId ?? 0)
+        _selectedTargetTermId = State(initialValue: matchedTarget ?? hit.targetTerms.first?.termId ?? 0)
+    }
+
+    var body: some View {
+        Form {
+            termSection("German", terms: hit.sourceTerms, selection: $selectedSourceTermId)
+            termSection("English translation", terms: hit.targetTerms, selection: $selectedTargetTermId)
+
+            Section {
+                Button {
+                    isApplying = true
+                    Task {
+                        await onApply(selectedSourceTermId, selectedTargetTermId)
+                        isApplying = false
+                    }
+                } label: {
+                    HStack {
+                        Spacer()
+                        if isApplying { ProgressView() }
+                        Text("Replace meaning")
+                        Spacer()
+                    }
+                }
+                .disabled(isApplying || selectedSourceTermId == 0 || selectedTargetTermId == 0)
+            }
+        }
+        .navigationTitle("Choose translation")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func termSection(_ title: String,
+                             terms: [TermDisplay],
+                             selection: Binding<Int64>) -> some View {
+        Section(title) {
+            ForEach(terms, id: \.termId) { term in
+                Button {
+                    selection.wrappedValue = term.termId
+                } label: {
+                    HStack {
+                        Text(term.surface)
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        if selection.wrappedValue == term.termId {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.tint)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 }

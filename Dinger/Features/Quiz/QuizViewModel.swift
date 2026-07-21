@@ -172,4 +172,21 @@ public final class QuizPlayViewModel {
         guard case let .question(q) = phase else { return }
         phase = .reveal(q, nil)
     }
+
+    public func replaceCurrentCard(with hit: SenseHit,
+                                   selectedSourceTermId: Int64,
+                                   selectedTargetTermId: Int64) async {
+        guard case let .reveal(question, inferredGrade) = phase else { return }
+        do {
+            let refreshed = try await session.replaceCard(
+                for: question,
+                with: hit,
+                selectedSourceTermId: selectedSourceTermId,
+                selectedTargetTermId: selectedTargetTermId
+            )
+            phase = .reveal(refreshed, inferredGrade)
+        } catch {
+            phase = .error(error.localizedDescription)
+        }
+    }
 }

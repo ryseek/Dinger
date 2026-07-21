@@ -131,13 +131,35 @@ public final class DeckListViewModel {
 
         return try await database.dbWriter.read { db in
             let rows = try Row.fetchAll(db, sql: """
-                SELECT reviewed_at, grade
-                  FROM review_log
-                 WHERE reviewed_at >= ?
-                 ORDER BY reviewed_at ASC
+                SELECT r.reviewed_at,
+                       r.grade,
+                       r.card_id,
+                       (SELECT MIN(first_r.reviewed_at)
+                          FROM review_log first_r
+                         WHERE first_r.card_id = r.card_id) AS first_reviewed_at,
+                       COALESCE(tf.surface, '?') AS front,
+                       COALESCE(tb.surface, '?') AS back,
+                       d.name AS deck_name
+                  FROM review_log r
+                  JOIN card c ON c.id = r.card_id
+                  JOIN deck d ON d.id = c.deck_id
+                  LEFT JOIN term tf ON tf.id = c.front_term_id
+                  LEFT JOIN term tb ON tb.id = c.back_term_id
+                 WHERE r.reviewed_at >= ?
+                 ORDER BY r.reviewed_at ASC
                 """, arguments: [cutoff])
 
+            struct WordAccumulator {
+                var cardId: Int64
+                var front: String
+                var back: String
+                var deckName: String
+                var reviewCount: Int
+                var failedReviewCount: Int
+                var isNew: Bool
+            }
             var counts: [Date: (reviews: Int, correct: Int)] = [:]
+            var wordsByDay: [Date: [Int64: WordAccumulator]] = [:]
             for row in rows {
                 let reviewedAt: Date = row["reviewed_at"]
                 let day = calendar.startOfDay(for: reviewedAt)
@@ -147,10 +169,40 @@ public final class DeckListViewModel {
                     count.correct += 1
                 }
                 counts[day] = count
+
+                let cardId: Int64 = row["card_id"]
+                let firstReviewedAt: Date = row["first_reviewed_at"]
+                var dayWords = wordsByDay[day] ?? [:]
+                var word = dayWords[cardId] ?? WordAccumulator(
+                    cardId: cardId,
+                    front: row["front"],
+                    back: row["back"],
+                    deckName: row["deck_name"],
+                    reviewCount: 0,
+                    failedReviewCount: 0,
+                    isNew: calendar.isDate(firstReviewedAt, inSameDayAs: reviewedAt)
+                )
+                word.reviewCount += 1
+                if (row["grade"] as Int? ?? Grade.again.rawValue) == Grade.again.rawValue {
+                    word.failedReviewCount += 1
+                }
+                dayWords[cardId] = word
+                wordsByDay[day] = dayWords
             }
 
             let days = counts.map { day, count in
-                StudyDay(date: day, reviewCount: count.reviews, correctCount: count.correct)
+                let words = (wordsByDay[day] ?? [:]).values.map {
+                    StudyWordActivity(
+                        cardId: $0.cardId,
+                        front: $0.front,
+                        back: $0.back,
+                        deckName: $0.deckName,
+                        reviewCount: $0.reviewCount,
+                        failedReviewCount: $0.failedReviewCount,
+                        isNew: $0.isNew
+                    )
+                }.sorted { $0.front.localizedCaseInsensitiveCompare($1.front) == .orderedAscending }
+                return StudyDay(date: day, reviewCount: count.reviews, correctCount: count.correct, words: words)
             }.sorted { $0.date < $1.date }
 
             var streak = 0
@@ -172,6 +224,7 @@ public struct StudyDay: Identifiable, Hashable, Sendable {
     public let date: Date
     public let reviewCount: Int
     public let correctCount: Int
+    public let words: [StudyWordActivity]
 
     public var id: Date { date }
 
@@ -179,6 +232,18 @@ public struct StudyDay: Identifiable, Hashable, Sendable {
         guard reviewCount > 0 else { return 0 }
         return Double(correctCount) / Double(reviewCount)
     }
+}
+
+public struct StudyWordActivity: Identifiable, Hashable, Sendable {
+    public let cardId: Int64
+    public let front: String
+    public let back: String
+    public let deckName: String
+    public let reviewCount: Int
+    public let failedReviewCount: Int
+    public let isNew: Bool
+
+    public var id: Int64 { cardId }
 }
 
 public struct StudyActivitySummary: Hashable, Sendable {
@@ -200,6 +265,10 @@ public struct CardRow: Identifiable, Hashable, Sendable {
     public let backSurfaces: [String]
     public let dueAt: Date?
     public let repetitions: Int
+    public let intervalDays: Int
+    public let lastReviewedAt: Date?
+    public let reviewCount: Int
+    public let successfulReviewCount: Int
     public let suspended: Bool
 
     public var frontSurface: String {
@@ -336,14 +405,19 @@ public final class DeckDetailViewModel {
                        tf.surface AS front_surface,
                        tb.surface AS back_surface,
                        s.due_at   AS due_at,
-                       s.repetitions AS repetitions
+                       s.repetitions AS repetitions,
+                       s.interval_days AS interval_days,
+                       s.last_reviewed_at AS last_reviewed_at,
+                       (SELECT COUNT(*) FROM review_log r WHERE r.card_id = c.id) AS review_count,
+                       (SELECT COUNT(*) FROM review_log r
+                         WHERE r.card_id = c.id AND r.grade != ?) AS successful_review_count
                   FROM card c
                   LEFT JOIN term tf ON tf.id = c.front_term_id
                   LEFT JOIN term tb ON tb.id = c.back_term_id
                   LEFT JOIN card_srs s ON s.card_id = c.id
                  WHERE c.deck_id = ?
                  ORDER BY c.created_at DESC
-                """, arguments: [deckId])
+                """, arguments: [Grade.again.rawValue, deckId])
             return try rows.map { row -> CardRow in
                 let card = Card(
                     id: row["id"],
@@ -366,6 +440,10 @@ public final class DeckDetailViewModel {
                     backSurfaces: backSurfaces.isEmpty ? [row["back_surface"] ?? "?"] : backSurfaces,
                     dueAt: row["due_at"],
                     repetitions: row["repetitions"] ?? 0,
+                    intervalDays: row["interval_days"] ?? 0,
+                    lastReviewedAt: row["last_reviewed_at"],
+                    reviewCount: row["review_count"] ?? 0,
+                    successfulReviewCount: row["successful_review_count"] ?? 0,
                     suspended: card.suspended
                 )
             }

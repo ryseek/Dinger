@@ -106,6 +106,34 @@ public nonisolated final class QuizSession: @unchecked Sendable {
         if grade != .again { state.correct += 1 }
     }
 
+    public func replaceCard(for question: Question,
+                            with hit: SenseHit,
+                            selectedSourceTermId: Int64,
+                            selectedTargetTermId: Int64) async throws -> Question {
+        guard let card = cardsById[question.id],
+              let generator = generators[card.deckId] else {
+            throw CardServiceError.senseNotFound
+        }
+        let replacement = try await cardService.replaceCard(
+            card,
+            with: hit,
+            selectedSourceTermId: selectedSourceTermId,
+            selectedTargetTermId: selectedTargetTermId
+        )
+        cardsById[question.id] = replacement.card
+        let mode: QuizMode
+        switch question.kind {
+        case .flashcard: mode = .flashcard
+        case .typing: mode = .typing
+        case .multipleChoice: mode = .multipleChoice
+        }
+        return try await generator.makeQuestion(
+            for: replacement.card,
+            mode: mode,
+            directionOverride: question.cardDirection
+        )
+    }
+
     /// Derive a grade from a typed/tapped answer.
     public static func gradeForTypedAnswer(_ raw: String, question: Question) -> Grade {
         let normalized = TextNormalizer.normalize(raw)

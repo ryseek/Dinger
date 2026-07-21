@@ -21,4 +21,9 @@ xcuserdata/
 !/resources/*.txt*.gz
 /resources/*.tsv
 !/resources/*.tsv.gz
+
+# Generated App Store assets
+/resources/app-store-metadata.md
+/resources/app-store-promotional/
+/resources/app-store-screenshots/
 scripts/*

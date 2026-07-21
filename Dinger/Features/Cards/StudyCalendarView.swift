@@ -8,6 +8,7 @@ struct StudyCalendarView: View {
     @State private var displayedMonth: Date
     @State private var expandedHeight: CGFloat = 0
     @State private var compactHeight: CGFloat = 0
+    @State private var selectedDay: StudyDaySelection?
     private let calendar = Calendar.autoupdatingCurrent
 
     init(activity: StudyActivitySummary,
@@ -60,6 +61,12 @@ struct StudyCalendarView: View {
             .accessibilityHidden(true)
         }
         .animation(.spring(response: 0.36, dampingFraction: 0.84), value: isCompact)
+        .navigationDestination(item: $selectedDay) { selection in
+            StudyDayDetailView(
+                date: selection.date,
+                day: activity.activity(on: selection.date, calendar: calendar)
+            )
+        }
     }
 
     private var targetHeight: CGFloat? {
@@ -224,26 +231,32 @@ struct StudyCalendarView: View {
         let reviewCount = day?.reviewCount ?? 0
         let isToday = calendar.isDateInToday(date)
 
-        return VStack(spacing: 1) {
-            Text(date.formatted(.dateTime.day()))
-                .font(.caption.weight(isToday ? .bold : .regular))
-            if reviewCount > 0 {
-                Text(reviewCount.formatted())
-                    .font(.system(size: 9, weight: .semibold, design: .rounded))
-            } else {
-                Text(" ")
-                    .font(.system(size: 9))
+        return Button {
+            selectedDay = StudyDaySelection(date: date)
+        } label: {
+            VStack(spacing: 1) {
+                Text(date.formatted(.dateTime.day()))
+                    .font(.caption.weight(isToday ? .bold : .regular))
+                if reviewCount > 0 {
+                    Text(reviewCount.formatted())
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                } else {
+                    Text(" ")
+                        .font(.system(size: 9))
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 38)
+            .foregroundStyle(reviewCount > 0 ? Color.primary : Color.secondary)
+            .background(dayColor(reviewCount), in: RoundedRectangle(cornerRadius: 8))
+            .overlay {
+                if isToday {
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(.blue, lineWidth: 2)
+                }
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 38)
-        .foregroundStyle(reviewCount > 0 ? Color.primary : Color.secondary)
-        .background(dayColor(reviewCount), in: RoundedRectangle(cornerRadius: 8))
-        .overlay {
-            if isToday {
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(.blue, lineWidth: 2)
-            }
-        }
+        .buttonStyle(.plain)
+        .disabled(date > Date())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(date.formatted(date: .complete, time: .omitted))
         .accessibilityValue("\(reviewCount) reviews")
@@ -295,5 +308,82 @@ struct StudyCalendarView: View {
         if reviewCount >= dailyGoal { return .green.opacity(0.3) }
         let fraction = min(Double(reviewCount) / Double(max(dailyGoal, 1)), 1)
         return .blue.opacity(0.12 + 0.25 * fraction)
+    }
+}
+
+private struct StudyDaySelection: Identifiable, Hashable {
+    let date: Date
+    var id: Date { date }
+}
+
+private struct StudyDayDetailView: View {
+    let date: Date
+    let day: StudyDay?
+
+    private var newWords: [StudyWordActivity] { day?.words.filter(\.isNew) ?? [] }
+    private var repeatedWords: [StudyWordActivity] { day?.words.filter { !$0.isNew } ?? [] }
+
+    var body: some View {
+        List {
+            Section {
+                LabeledContent("Reviews", value: (day?.reviewCount ?? 0).formatted())
+                LabeledContent("New words", value: newWords.count.formatted())
+                LabeledContent("Repeated words", value: repeatedWords.count.formatted())
+            }
+
+            wordSection("New", words: newWords, icon: "sparkles", color: .blue)
+            wordSection("Repeated", words: repeatedWords, icon: "repeat", color: .purple)
+
+            if newWords.isEmpty && repeatedWords.isEmpty {
+                ContentUnavailableView(
+                    "No Reviews",
+                    systemImage: "calendar",
+                    description: Text("No words were reviewed on this day.")
+                )
+            }
+        }
+        .navigationTitle(date.formatted(date: .abbreviated, time: .omitted))
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    @ViewBuilder
+    private func wordSection(_ title: String, words: [StudyWordActivity], icon: String, color: Color) -> some View {
+        if !words.isEmpty {
+            Section {
+                ForEach(words) { word in
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(word.front).font(.headline)
+                            Text(word.back)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Text(word.deckName)
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 4) {
+                            if word.failedReviewCount > 0 {
+                                Label(
+                                    "\(word.failedReviewCount) missed",
+                                    systemImage: "exclamationmark.circle.fill"
+                                )
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.red)
+                            }
+                            if word.reviewCount > 1 {
+                                Text("×\(word.reviewCount) reviews")
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .listRowBackground(word.failedReviewCount > 0 ? Color.red.opacity(0.08) : nil)
+                }
+            } header: {
+                Label("\(title) · \(words.count)", systemImage: icon)
+                    .foregroundStyle(color)
+            }
+        }
     }
 }
