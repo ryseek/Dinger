@@ -9,6 +9,7 @@ public nonisolated enum CardServiceError: Error, LocalizedError, Sendable {
     case duplicateAfterReplacement
     case selectedTermNotFound
     case invalidDeckName
+    case invalidDisplayText
     case invalidDeckFile
     case unsupportedDeckFileFormat(String)
     case unresolvedDeckCard(String)
@@ -23,6 +24,7 @@ public nonisolated enum CardServiceError: Error, LocalizedError, Sendable {
             return "That meaning is already a card in this deck."
         case .selectedTermNotFound:  return "The selected translation is no longer available."
         case .invalidDeckName:       return "Deck name can't be empty."
+        case .invalidDisplayText:    return "Custom card text can contain up to 1,000 characters."
         case .invalidDeckFile:       return "This deck file is malformed or incomplete."
         case .unsupportedDeckFileFormat(let format):
             return "Unsupported deck file format: \(format)."
@@ -137,7 +139,7 @@ public nonisolated final class CardService: @unchecked Sendable {
            backup.format == AllDecksExportFormat.current {
             exports = backup.decks
         } else if let deck = try? decoder.decode(DeckExportFile.self, from: data),
-                  deck.format == DeckExportFormat.current {
+                  DeckExportFormat.supported.contains(deck.format) {
             exports = [deck]
         } else {
             let format = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["format"] as? String
@@ -176,7 +178,7 @@ public nonisolated final class CardService: @unchecked Sendable {
     private nonisolated static func importDeck(_ export: DeckExportFile,
                                                 db: Database,
                                                 cardImported: () -> Void) throws -> Deck {
-        guard export.format == DeckExportFormat.current else {
+        guard DeckExportFormat.supported.contains(export.format) else {
             throw CardServiceError.unsupportedDeckFileFormat(export.format)
         }
         let deckName = export.deck.name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -209,6 +211,8 @@ public nonisolated final class CardService: @unchecked Sendable {
                             backTermId: backTermId,
                             frontTermIds: frontTermIds,
                             backTermIds: backTermIds,
+                            frontTextOverride: exportedCard.frontTextOverride,
+                            backTextOverride: exportedCard.backTextOverride,
                             direction: exportedCard.direction,
                             createdAt: exportedCard.createdAt,
                             suspended: exportedCard.suspended)
@@ -370,7 +374,9 @@ public nonisolated final class CardService: @unchecked Sendable {
                        front_term_id = ?,
                        back_term_id = ?,
                        front_term_ids = ?,
-                       back_term_ids = ?
+                       back_term_ids = ?,
+                       front_text_override = NULL,
+                       back_text_override = NULL
                  WHERE id = ?
                 """, arguments: [
                     hit.senseId,
@@ -431,6 +437,8 @@ public nonisolated final class CardService: @unchecked Sendable {
             direction: card.direction,
             frontTerms: try exportedTerms(db: db, senseId: card.senseId, termIds: card.frontTermIds),
             backTerms: try exportedTerms(db: db, senseId: card.senseId, termIds: card.backTermIds),
+            frontTextOverride: card.frontTextOverride,
+            backTextOverride: card.backTextOverride,
             suspended: card.suspended,
             createdAt: card.createdAt,
             srs: ExportedCardSRS(
@@ -455,6 +463,12 @@ public nonisolated final class CardService: @unchecked Sendable {
     }
 
     private nonisolated static func validate(_ card: ExportedCard) throws {
+        for value in [card.frontTextOverride, card.backTextOverride] {
+            guard let value else { continue }
+            guard let cleaned = try? validatedTextOverride(value), cleaned == value else {
+                throw CardServiceError.invalidDeckFile
+            }
+        }
         let srs = card.srs
         guard srs.ease.isFinite,
               srs.intervalDays.isFinite,
@@ -586,6 +600,92 @@ public nonisolated final class CardService: @unchecked Sendable {
         }
     }
 
+    /// Set learner-facing text without changing the backing dictionary sense,
+    /// selected terms, SRS state, or review history. Empty text restores the
+    /// dictionary display for that side.
+    @discardableResult
+    public func updateDisplayText(card: Card,
+                                  front: String?,
+                                  back: String?) async throws -> Card {
+        guard let cardId = card.id else { throw CardServiceError.senseNotFound }
+        let cleanedFront = try Self.validatedTextOverride(front)
+        let cleanedBack = try Self.validatedTextOverride(back)
+        return try await database.dbWriter.write { db in
+            try db.execute(sql: """
+                UPDATE card
+                   SET front_text_override = ?,
+                       back_text_override = ?
+                 WHERE id = ?
+                """, arguments: [cleanedFront, cleanedBack, cardId])
+            var updated = card
+            updated.frontTextOverride = cleanedFront
+            updated.backTextOverride = cleanedBack
+            return updated
+        }
+    }
+
+    /// Update the selected dictionary variants and optional learner-facing
+    /// text in one transaction. The card row, SRS state, and review history
+    /// keep their identity.
+    @discardableResult
+    public func updateCardContent(card: Card,
+                                  hit: SenseHit,
+                                  selectedSourceTermIds: [Int64],
+                                  selectedTargetTermIds: [Int64],
+                                  frontTextOverride: String?,
+                                  backTextOverride: String?) async throws -> Card {
+        guard let cardId = card.id, hit.senseId == card.senseId else {
+            throw CardServiceError.senseNotFound
+        }
+        let (front, back) = try Self.pickFrontBack(
+            hit: hit,
+            direction: card.direction,
+            selectedSourceTermIds: selectedSourceTermIds,
+            selectedTargetTermIds: selectedTargetTermIds
+        )
+        let cleanedFront = try Self.validatedTextOverride(frontTextOverride)
+        let cleanedBack = try Self.validatedTextOverride(backTextOverride)
+        let frontIdsRaw = Card.encodeTermIds(front.map(\.termId))
+        let backIdsRaw = Card.encodeTermIds(back.map(\.termId))
+
+        return try await database.dbWriter.write { db in
+            try db.execute(sql: """
+                UPDATE card
+                   SET front_term_id = ?,
+                       back_term_id = ?,
+                       front_term_ids = ?,
+                       back_term_ids = ?,
+                       front_text_override = ?,
+                       back_text_override = ?
+                 WHERE id = ?
+                """, arguments: [
+                    front[0].termId,
+                    back[0].termId,
+                    frontIdsRaw,
+                    backIdsRaw,
+                    cleanedFront,
+                    cleanedBack,
+                    cardId
+                ])
+            var updated = card
+            updated.frontTermId = front[0].termId
+            updated.backTermId = back[0].termId
+            updated.frontTermIdsRaw = frontIdsRaw
+            updated.backTermIdsRaw = backIdsRaw
+            updated.frontTextOverride = cleanedFront
+            updated.backTextOverride = cleanedBack
+            return updated
+        }
+    }
+
+    private nonisolated static func validatedTextOverride(_ value: String?) throws -> String? {
+        guard let cleaned = Card.cleanedTextOverride(value) else { return nil }
+        guard cleaned.count <= 1_000, !cleaned.contains("\0") else {
+            throw CardServiceError.invalidDisplayText
+        }
+        return cleaned
+    }
+
     public func delete(card: Card) async throws {
         guard let id = card.id else { return }
         try await database.dbWriter.write { db in
@@ -616,6 +716,8 @@ public nonisolated final class CardService: @unchecked Sendable {
                        back_term_id = ?,
                        front_term_ids = ?,
                        back_term_ids = ?,
+                       front_text_override = ?,
+                       back_text_override = ?,
                        direction = ?
                  WHERE id = ?
                 """, arguments: [
@@ -623,6 +725,8 @@ public nonisolated final class CardService: @unchecked Sendable {
                     card.frontTermId,
                     card.backTermIdsRaw,
                     card.frontTermIdsRaw,
+                    card.backTextOverride,
+                    card.frontTextOverride,
                     newDirection.rawValue,
                     cardId
                 ])
@@ -632,6 +736,8 @@ public nonisolated final class CardService: @unchecked Sendable {
             updated.backTermId  = card.frontTermId
             updated.frontTermIdsRaw = card.backTermIdsRaw
             updated.backTermIdsRaw = card.frontTermIdsRaw
+            updated.frontTextOverride = card.backTextOverride
+            updated.backTextOverride = card.frontTextOverride
             updated.direction   = newDirection
             return updated
         }

@@ -200,6 +200,9 @@ public nonisolated final class QuestionGenerator: @unchecked Sendable {
             let frontTerms = try Self.fetchTermSurfaces(db: db, termIds: frontTermIds, languageCode: frontLangCode)
             let backTerms = try Self.fetchTermSurfaces(db: db, termIds: backTermIds, languageCode: backLangCode)
             let promptTerm = frontTerms.randomElement()
+            let textOverrides = card.textOverrides(for: direction)
+            let frontSurfaces = textOverrides.front.map { [$0] } ?? frontTerms.map(\.surface)
+            let backSurfaces = textOverrides.back.map { [$0] } ?? backTerms.map(\.surface)
 
             // Determine POS/gender from any term on the sense, preferring
             // one that has a gender (noun) or POS set. English terms are
@@ -220,9 +223,9 @@ public nonisolated final class QuestionGenerator: @unchecked Sendable {
             }
 
             return Payload(
-                frontSurface: promptTerm?.surface ?? "?",
-                frontSurfaces: frontTerms.map(\.surface),
-                backSurfaces: backTerms.map(\.surface),
+                frontSurface: textOverrides.front ?? promptTerm?.surface ?? "?",
+                frontSurfaces: frontSurfaces,
+                backSurfaces: backSurfaces,
                 frontExample: example?.text(for: frontLangCode),
                 backExample: example?.text(for: backLangCode),
                 frontLangCode: frontLangCode,

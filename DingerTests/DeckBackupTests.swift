@@ -14,7 +14,12 @@ final class DeckBackupTests: XCTestCase {
             service: sourceService,
             database: sourceDatabase
         )
-        try await sourceService.suspend(card: card, true)
+        let customized = try await sourceService.updateDisplayText(
+            card: card,
+            front: "das Haus",
+            back: "home"
+        )
+        try await sourceService.suspend(card: customized, true)
 
         let firstReview = Date(timeIntervalSince1970: 1_700_000_000)
         let secondReview = firstReview.addingTimeInterval(86_400)
@@ -28,6 +33,8 @@ final class DeckBackupTests: XCTestCase {
         XCTAssertEqual(exportedCard.srs.repetitions, expectedSRS.repetitions)
         XCTAssertEqual(exportedCard.srs.lapses, expectedSRS.lapses)
         XCTAssertEqual(exportedCard.reviewHistory.count, 2)
+        XCTAssertEqual(exportedCard.frontTextOverride, "das Haus")
+        XCTAssertEqual(exportedCard.backTextOverride, "home")
 
         let destinationDatabase = try await TestDatabaseSupport.makeDatabase()
         let destinationService = CardService(database: destinationDatabase)
@@ -40,6 +47,8 @@ final class DeckBackupTests: XCTestCase {
         let restoredSRS = try await destinationService.srs(for: importedCard)
         let importedSRS = try XCTUnwrap(restoredSRS)
         XCTAssertTrue(importedCard.suspended)
+        XCTAssertEqual(importedCard.frontTextOverride, "das Haus")
+        XCTAssertEqual(importedCard.backTextOverride, "home")
         XCTAssertEqual(importedSRS.ease, expectedSRS.ease)
         XCTAssertEqual(importedSRS.intervalDays, expectedSRS.intervalDays)
         XCTAssertEqual(importedSRS.repetitions, expectedSRS.repetitions)

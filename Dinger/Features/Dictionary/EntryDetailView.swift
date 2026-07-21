@@ -230,7 +230,7 @@ struct EntryDetailView: View {
     }
 }
 
-private struct TermSelectionList: View {
+struct TermSelectionList: View {
     let terms: [TermDisplay]
     @Binding var selectedTermIds: Set<Int64>
     let selectableLabel: String

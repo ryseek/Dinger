@@ -25,6 +25,8 @@ public nonisolated struct Card: Codable, Identifiable, FetchableRecord, MutableP
     public var backTermId: Int64
     public var frontTermIdsRaw: String
     public var backTermIdsRaw: String
+    public var frontTextOverride: String?
+    public var backTextOverride: String?
     public var direction: CardDirection
     public var createdAt: Date
     public var suspended: Bool
@@ -39,6 +41,8 @@ public nonisolated struct Card: Codable, Identifiable, FetchableRecord, MutableP
         case backTermId = "back_term_id"
         case frontTermIdsRaw = "front_term_ids"
         case backTermIdsRaw = "back_term_ids"
+        case frontTextOverride = "front_text_override"
+        case backTextOverride = "back_text_override"
         case direction
         case createdAt = "created_at"
         case suspended
@@ -51,6 +55,8 @@ public nonisolated struct Card: Codable, Identifiable, FetchableRecord, MutableP
                 backTermId: Int64,
                 frontTermIds: [Int64] = [],
                 backTermIds: [Int64] = [],
+                frontTextOverride: String? = nil,
+                backTextOverride: String? = nil,
                 direction: CardDirection,
                 createdAt: Date = Date(),
                 suspended: Bool = false) {
@@ -61,6 +67,8 @@ public nonisolated struct Card: Codable, Identifiable, FetchableRecord, MutableP
         self.backTermId = backTermId
         self.frontTermIdsRaw = Self.encodeTermIds(frontTermIds.isEmpty ? [frontTermId] : frontTermIds)
         self.backTermIdsRaw = Self.encodeTermIds(backTermIds.isEmpty ? [backTermId] : backTermIds)
+        self.frontTextOverride = Self.cleanedTextOverride(frontTextOverride)
+        self.backTextOverride = Self.cleanedTextOverride(backTextOverride)
         self.direction = direction
         self.createdAt = createdAt
         self.suspended = suspended
@@ -78,6 +86,21 @@ public nonisolated struct Card: Codable, Identifiable, FetchableRecord, MutableP
     public var backTermIds: [Int64] {
         let decoded = Self.decodeTermIds(backTermIdsRaw)
         return decoded.isEmpty ? [backTermId] : decoded
+    }
+
+    /// Custom display text follows the card's stored front/back orientation.
+    /// Direction overrides used by quizzes therefore swap it just like term IDs.
+    public func textOverrides(for direction: CardDirection) -> (front: String?, back: String?) {
+        if direction == self.direction {
+            return (frontTextOverride, backTextOverride)
+        }
+        return (backTextOverride, frontTextOverride)
+    }
+
+    public static func cleanedTextOverride(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     public static func encodeTermIds(_ ids: [Int64]) -> String {

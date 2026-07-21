@@ -340,6 +340,15 @@ public nonisolated final class AppDatabase: @unchecked Sendable {
                 """)
         }
 
+        migrator.registerMigration("card-display-text-overrides-v1") { db in
+            try db.execute(sql: """
+                ALTER TABLE card ADD COLUMN front_text_override TEXT
+                """)
+            try db.execute(sql: """
+                ALTER TABLE card ADD COLUMN back_text_override TEXT
+                """)
+        }
+
         return migrator
     }
 

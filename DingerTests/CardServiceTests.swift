@@ -3,6 +3,145 @@ import XCTest
 @testable import Dinger
 
 final class CardServiceTests: XCTestCase {
+    func testDisplayTextOverridesPreserveProgressAndRoundTrip() async throws {
+        let sourceDatabase = try await TestDatabaseSupport.makeDatabase()
+        let sourceService = CardService(database: sourceDatabase)
+        let deck = try await sourceService.createDeck(name: "Study", pair: .deEN)
+        let original = try await TestDatabaseSupport.card(
+            "Haus",
+            deck: deck,
+            service: sourceService,
+            database: sourceDatabase
+        )
+        let reviewDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let reviewedSRS = try await sourceService.grade(card: original, grade: .good, now: reviewDate)
+
+        let customized = try await sourceService.updateDisplayText(
+            card: original,
+            front: "  das Haus  ",
+            back: "home"
+        )
+        let savedSRS = try await sourceService.srs(for: customized)
+        let customizedSRS = try XCTUnwrap(savedSRS)
+
+        XCTAssertEqual(customized.frontTextOverride, "das Haus")
+        XCTAssertEqual(customized.backTextOverride, "home")
+        XCTAssertEqual(customizedSRS.repetitions, reviewedSRS.repetitions)
+        XCTAssertEqual(customizedSRS.dueAt, reviewedSRS.dueAt)
+
+        let exportedData = try await sourceService.exportDeck(deck)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let exported = try decoder.decode(DeckExportFile.self, from: exportedData)
+        let exportedCard = try XCTUnwrap(exported.cards.first)
+        XCTAssertEqual(exported.format, DeckExportFormat.current)
+        XCTAssertEqual(exportedCard.frontTextOverride, "das Haus")
+        XCTAssertEqual(exportedCard.backTextOverride, "home")
+        XCTAssertEqual(exportedCard.reviewHistory.count, 1)
+
+        let destinationDatabase = try await TestDatabaseSupport.makeDatabase()
+        let destinationService = CardService(database: destinationDatabase)
+        let importedDeck = try await destinationService.importDeck(from: exportedData)
+        let importedCards = try await destinationService.cards(in: importedDeck)
+        let importedCard = try XCTUnwrap(importedCards.first)
+        let restoredSRS = try await destinationService.srs(for: importedCard)
+        let importedSRS = try XCTUnwrap(restoredSRS)
+
+        XCTAssertEqual(importedCard.frontTextOverride, "das Haus")
+        XCTAssertEqual(importedCard.backTextOverride, "home")
+        XCTAssertEqual(importedSRS.repetitions, reviewedSRS.repetitions)
+        XCTAssertEqual(importedSRS.dueAt, reviewedSRS.dueAt)
+    }
+
+    func testInvertSwapsDisplayTextOverrides() async throws {
+        let database = try await TestDatabaseSupport.makeDatabase()
+        let service = CardService(database: database)
+        let deck = try await service.createDeck(name: "Study", pair: .deEN)
+        let card = try await TestDatabaseSupport.card("Haus", deck: deck, service: service, database: database)
+        let customized = try await service.updateDisplayText(
+            card: card,
+            front: "das Haus",
+            back: "home"
+        )
+
+        let inverted = try await service.invert(card: customized)
+
+        XCTAssertEqual(inverted.direction, .targetToSource)
+        XCTAssertEqual(inverted.frontTextOverride, "home")
+        XCTAssertEqual(inverted.backTextOverride, "das Haus")
+    }
+
+    func testV2DeckWithoutDisplayTextStillImports() async throws {
+        let sourceDatabase = try await TestDatabaseSupport.makeDatabase()
+        let sourceService = CardService(database: sourceDatabase)
+        let deck = try await sourceService.createDeck(name: "Legacy", pair: .deEN)
+        _ = try await TestDatabaseSupport.card("Haus", deck: deck, service: sourceService, database: sourceDatabase)
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        var legacyExport = try decoder.decode(DeckExportFile.self, from: try await sourceService.exportDeck(deck))
+        legacyExport.format = "dinger.deck.v2"
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let destinationDatabase = try await TestDatabaseSupport.makeDatabase()
+        let destinationService = CardService(database: destinationDatabase)
+        let importedDeck = try await destinationService.importDeck(from: encoder.encode(legacyExport))
+        let importedCards = try await destinationService.cards(in: importedDeck)
+
+        XCTAssertEqual(importedCards.count, 1)
+        XCTAssertNil(importedCards[0].frontTextOverride)
+        XCTAssertNil(importedCards[0].backTextOverride)
+    }
+
+    func testEditingDictionaryVariantsAndCustomTextPreservesProgress() async throws {
+        let database = try await TestDatabaseSupport.makeDatabase()
+        let service = CardService(database: database)
+        let deck = try await service.createDeck(name: "Study", pair: .deEN)
+        let card = try await TestDatabaseSupport.card("Haus", deck: deck, service: service, database: database)
+        let reviewedSRS = try await service.grade(
+            card: card,
+            grade: .good,
+            now: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        try await database.dbWriter.write { db in
+            try db.execute(sql: """
+                INSERT INTO term (id, sense_id, language_id, surface, headword, normalized, pos, gender)
+                VALUES
+                    (43, 1, 1, 'Gebäude {n}', 'Gebäude', 'gebaude', NULL, 'n'),
+                    (44, 1, 2, 'home', 'home', 'home', NULL, NULL)
+                """)
+        }
+        let loadedHit = try await DictionarySearchService(database: database).senseHit(senseId: card.senseId)
+        let hit = try XCTUnwrap(loadedHit)
+
+        let updated = try await service.updateCardContent(
+            card: card,
+            hit: hit,
+            selectedSourceTermIds: [1, 43],
+            selectedTargetTermIds: [2, 44],
+            frontTextOverride: "das Haus",
+            backTextOverride: "home"
+        )
+        let restoredSRS = try await service.srs(for: updated)
+        let savedSRS = try XCTUnwrap(restoredSRS)
+
+        XCTAssertEqual(updated.id, card.id)
+        XCTAssertEqual(updated.frontTermIds, [1, 43])
+        XCTAssertEqual(updated.backTermIds, [2, 44])
+        XCTAssertEqual(updated.frontTextOverride, "das Haus")
+        XCTAssertEqual(updated.backTextOverride, "home")
+        XCTAssertEqual(savedSRS, reviewedSRS)
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let exported = try decoder.decode(DeckExportFile.self, from: try await service.exportDeck(deck))
+        let exportedCard = try XCTUnwrap(exported.cards.first)
+        XCTAssertEqual(exportedCard.frontTerms.map(\.surface), ["Haus {n}", "Gebäude {n}"])
+        XCTAssertEqual(exportedCard.backTerms.map(\.surface), ["house", "home"])
+        XCTAssertEqual(exportedCard.reviewHistory.count, 1)
+    }
+
     func testReplacingCardSensePreservesIdentityAndProgress() async throws {
         let database = try await TestDatabaseSupport.makeDatabase()
         let service = CardService(database: database)

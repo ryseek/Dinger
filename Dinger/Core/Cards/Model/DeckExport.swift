@@ -1,7 +1,8 @@
 import Foundation
 
 public nonisolated enum DeckExportFormat {
-    public static let current = "dinger.deck.v2"
+    public static let current = "dinger.deck.v3"
+    public static let supported: Set<String> = ["dinger.deck.v2", current]
 }
 
 public nonisolated enum AllDecksExportFormat {
@@ -56,6 +57,8 @@ public nonisolated struct ExportedCard: Codable, Hashable, Sendable {
     public var direction: CardDirection
     public var frontTerms: [ExportedTerm]
     public var backTerms: [ExportedTerm]
+    public var frontTextOverride: String?
+    public var backTextOverride: String?
     public var suspended: Bool
     public var createdAt: Date
     public var srs: ExportedCardSRS
@@ -65,6 +68,8 @@ public nonisolated struct ExportedCard: Codable, Hashable, Sendable {
                 direction: CardDirection,
                 frontTerms: [ExportedTerm],
                 backTerms: [ExportedTerm],
+                frontTextOverride: String? = nil,
+                backTextOverride: String? = nil,
                 suspended: Bool,
                 createdAt: Date,
                 srs: ExportedCardSRS,
@@ -73,6 +78,8 @@ public nonisolated struct ExportedCard: Codable, Hashable, Sendable {
         self.direction = direction
         self.frontTerms = frontTerms
         self.backTerms = backTerms
+        self.frontTextOverride = Card.cleanedTextOverride(frontTextOverride)
+        self.backTextOverride = Card.cleanedTextOverride(backTextOverride)
         self.suspended = suspended
         self.createdAt = createdAt
         self.srs = srs

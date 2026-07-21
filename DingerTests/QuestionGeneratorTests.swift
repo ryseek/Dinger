@@ -2,6 +2,40 @@ import XCTest
 @testable import Dinger
 
 final class QuestionGeneratorTests: XCTestCase {
+    func testDisplayTextOverridesDictionaryWordingInBothDirections() async throws {
+        let database = try await TestDatabaseSupport.makeDatabase()
+        let service = CardService(database: database)
+        let deck = try await service.createDeck(name: "Study", pair: .deEN)
+        let card = try await TestDatabaseSupport.card(
+            "Haus",
+            deck: deck,
+            service: service,
+            database: database
+        )
+        let customized = try await service.updateDisplayText(
+            card: card,
+            front: "das Haus",
+            back: "home"
+        )
+        let generator = QuestionGenerator(reader: database.dbWriter, deck: deck)
+
+        let native = try await generator.makeQuestion(for: customized, mode: .typing)
+        XCTAssertEqual(native.front, "das Haus")
+        XCTAssertEqual(native.displayFronts, ["das Haus"])
+        XCTAssertEqual(native.displayAnswers, ["home"])
+        XCTAssertEqual(native.acceptableAnswers, ["home"])
+
+        let reversed = try await generator.makeQuestion(
+            for: customized,
+            mode: .typing,
+            directionOverride: .targetToSource
+        )
+        XCTAssertEqual(reversed.front, "home")
+        XCTAssertEqual(reversed.displayFronts, ["home"])
+        XCTAssertEqual(reversed.displayAnswers, ["das Haus"])
+        XCTAssertEqual(reversed.acceptableAnswers, ["das haus"])
+    }
+
     func testMultipleChoiceGeneratesEightUniqueChoices() async throws {
         let database = try await TestDatabaseSupport.makeDatabase()
         let service = CardService(database: database)
@@ -60,6 +94,7 @@ final class QuestionGeneratorTests: XCTestCase {
             service: service,
             database: database
         )
+        _ = try await TestDatabaseSupport.card("gehen", deck: deck, service: service, database: database)
         let generator = QuestionGenerator(reader: database.dbWriter, deck: deck)
 
         let question = try await generator.makeQuestion(for: questionCard, mode: .multipleChoice)

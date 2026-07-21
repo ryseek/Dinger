@@ -137,8 +137,8 @@ public final class DeckListViewModel {
                        (SELECT MIN(first_r.reviewed_at)
                           FROM review_log first_r
                          WHERE first_r.card_id = r.card_id) AS first_reviewed_at,
-                       COALESCE(tf.surface, '?') AS front,
-                       COALESCE(tb.surface, '?') AS back,
+                       COALESCE(c.front_text_override, tf.surface, '?') AS front,
+                       COALESCE(c.back_text_override, tb.surface, '?') AS back,
                        d.name AS deck_name
                   FROM review_log r
                   JOIN card c ON c.id = r.card_id
@@ -261,8 +261,8 @@ public struct StudyActivitySummary: Hashable, Sendable {
 public struct CardRow: Identifiable, Hashable, Sendable {
     public let id: Int64
     public let card: Card
-    public let frontSurfaces: [String]
-    public let backSurfaces: [String]
+    public let dictionaryFrontSurfaces: [String]
+    public let dictionaryBackSurfaces: [String]
     public let dueAt: Date?
     public let repetitions: Int
     public let intervalDays: Int
@@ -270,6 +270,14 @@ public struct CardRow: Identifiable, Hashable, Sendable {
     public let reviewCount: Int
     public let successfulReviewCount: Int
     public let suspended: Bool
+
+    public var frontSurfaces: [String] {
+        card.frontTextOverride.map { [$0] } ?? dictionaryFrontSurfaces
+    }
+
+    public var backSurfaces: [String] {
+        card.backTextOverride.map { [$0] } ?? dictionaryBackSurfaces
+    }
 
     public var frontSurface: String {
         frontSurfaces.first ?? "?"
@@ -427,6 +435,8 @@ public final class DeckDetailViewModel {
                     backTermId: row["back_term_id"],
                     frontTermIds: Card.decodeTermIds(row["front_term_ids"] ?? ""),
                     backTermIds: Card.decodeTermIds(row["back_term_ids"] ?? ""),
+                    frontTextOverride: row["front_text_override"],
+                    backTextOverride: row["back_text_override"],
                     direction: CardDirection(rawValue: row["direction"]) ?? .sourceToTarget,
                     createdAt: row["created_at"],
                     suspended: (row["suspended"] as Int? ?? 0) != 0
@@ -436,8 +446,8 @@ public final class DeckDetailViewModel {
                 return CardRow(
                     id: card.id ?? 0,
                     card: card,
-                    frontSurfaces: frontSurfaces.isEmpty ? [row["front_surface"] ?? "?"] : frontSurfaces,
-                    backSurfaces: backSurfaces.isEmpty ? [row["back_surface"] ?? "?"] : backSurfaces,
+                    dictionaryFrontSurfaces: frontSurfaces.isEmpty ? [row["front_surface"] ?? "?"] : frontSurfaces,
+                    dictionaryBackSurfaces: backSurfaces.isEmpty ? [row["back_surface"] ?? "?"] : backSurfaces,
                     dueAt: row["due_at"],
                     repetitions: row["repetitions"] ?? 0,
                     intervalDays: row["interval_days"] ?? 0,
@@ -497,8 +507,8 @@ public final class DeckDetailViewModel {
 
             let hardestRows = try Row.fetchAll(db, sql: """
                 SELECT c.id,
-                       COALESCE(tf.surface, '?') AS front,
-                       COALESCE(tb.surface, '?') AS back,
+                       COALESCE(c.front_text_override, tf.surface, '?') AS front,
+                       COALESCE(c.back_text_override, tb.surface, '?') AS back,
                        COUNT(r.id) AS review_count,
                        SUM(CASE WHEN r.grade = ? THEN 1 ELSE 0 END) AS again_count
                   FROM card c
