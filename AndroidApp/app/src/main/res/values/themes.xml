@@ -1,0 +1,9 @@
+<resources>
+    <style name="Theme.Dinger" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">#386A20</item>
+        <item name="android:navigationBarColor">#FAFDF6</item>
+        <item name="android:statusBarColor">#FAFDF6</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>

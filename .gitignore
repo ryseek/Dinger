@@ -27,3 +27,4 @@ xcuserdata/
 /resources/app-store-promotional/
 /resources/app-store-screenshots/
 scripts/*
+!/scripts/build-android-sqlite.sh
