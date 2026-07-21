@@ -93,22 +93,38 @@ public nonisolated final class DictionarySearchService: @unchecked Sendable {
         case .sourceToTarget: return languageIds.source
         case .targetToSource: return languageIds.target
         case .auto:
-            // If the query exists as a term in the source language, prefer source→target;
-            // if it exists in target, prefer target→source; otherwise no restriction.
+            // Exact matches are stronger language evidence than prefixes. For example,
+            // English "car" must beat German terms beginning with "car…". Only fall
+            // back to prefix evidence when neither language has an exact match.
             return try await reader.read { db in
                 let prefix = Self.likeEscape(normalized) + "%"
-                let srcCount = try Int.fetchOne(db, sql: """
-                    SELECT COUNT(*) FROM term
-                    WHERE language_id = ? AND (normalized = ? OR normalized LIKE ? ESCAPE '^')
-                    LIMIT 1
-                """, arguments: [languageIds.source, normalized, prefix]) ?? 0
-                if srcCount > 0 { return languageIds.source }
-                let tgtCount = try Int.fetchOne(db, sql: """
-                    SELECT COUNT(*) FROM term
-                    WHERE language_id = ? AND (normalized = ? OR normalized LIKE ? ESCAPE '^')
-                    LIMIT 1
-                """, arguments: [languageIds.target, normalized, prefix]) ?? 0
-                if tgtCount > 0 { return languageIds.target }
+                let rows = try Row.fetchAll(db, sql: """
+                    SELECT language_id,
+                           SUM(CASE WHEN normalized = ? THEN 1 ELSE 0 END) AS exact_count,
+                           COUNT(*) AS prefix_count
+                      FROM term
+                     WHERE language_id IN (?, ?)
+                       AND normalized LIKE ? ESCAPE '^'
+                     GROUP BY language_id
+                """, arguments: [normalized, languageIds.source, languageIds.target, prefix])
+
+                var sourceCounts = (exact: 0, prefix: 0)
+                var targetCounts = (exact: 0, prefix: 0)
+                for row in rows {
+                    let languageId: Int64 = row["language_id"]
+                    let exactCount: Int = row["exact_count"]
+                    let prefixCount: Int = row["prefix_count"]
+                    let counts = (exact: exactCount, prefix: prefixCount)
+                    if languageId == languageIds.source { sourceCounts = counts }
+                    else if languageId == languageIds.target { targetCounts = counts }
+                }
+
+                if sourceCounts.exact > 0, targetCounts.exact == 0 { return languageIds.source }
+                if targetCounts.exact > 0, sourceCounts.exact == 0 { return languageIds.target }
+                if sourceCounts.exact > 0, targetCounts.exact > 0 { return nil }
+
+                if sourceCounts.prefix > 0, targetCounts.prefix == 0 { return languageIds.source }
+                if targetCounts.prefix > 0, sourceCounts.prefix == 0 { return languageIds.target }
                 return nil
             }
         }
@@ -149,7 +165,9 @@ public nonisolated final class DictionarySearchService: @unchecked Sendable {
         }
 
         // Single SQL: compute the best (lowest) priority per term, join to
-        // sense, keep best priority per sense, order by priority then length.
+        // sense, keep the actual best-matching term per sense, then order by
+        // match quality. Exact-match ties prefer a simpler opposite-language
+        // headword; lower-quality matches preserve their prior length ranking.
         let sql = """
         WITH ranked AS (
             SELECT t.id AS term_id, t.sense_id, t.language_id, 0 AS pri, LENGTH(t.headword) AS len
@@ -177,21 +195,43 @@ public nonisolated final class DictionarySearchService: @unchecked Sendable {
              WHERE t.normalized LIKE ? ESCAPE '^'
                AND t.normalized NOT LIKE ? ESCAPE '^'\(langClause)
         ),
-        best_per_sense AS (
-            SELECT sense_id,
-                   MIN(pri) AS pri,
-                   MIN(term_id) AS matched_term_id,
-                   MIN(len) AS len
+        ordered_per_sense AS (
+            SELECT term_id, sense_id, language_id, pri, len,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY sense_id
+                       ORDER BY pri ASC, len ASC, term_id ASC
+                   ) AS row_number
               FROM ranked
-             GROUP BY sense_id
+        ),
+        best_per_sense AS (
+            SELECT term_id AS matched_term_id, sense_id, language_id, pri, len
+              FROM ordered_per_sense
+             WHERE row_number = 1
         )
         SELECT bps.sense_id, bps.matched_term_id, bps.pri,
                s.entry_id, s.domain, s.context,
-               t.language_id, t.surface, t.headword
+               t.language_id, t.surface, t.headword,
+               COALESCE((
+                   SELECT MIN(LENGTH(TRIM(other.normalized))
+                              - LENGTH(REPLACE(TRIM(other.normalized), ' ', '')) + 1)
+                     FROM term other
+                    WHERE other.sense_id = bps.sense_id
+                      AND other.language_id <> bps.language_id
+               ), 999) AS counterpart_words,
+               COALESCE((
+                   SELECT MIN(LENGTH(other.headword))
+                     FROM term other
+                    WHERE other.sense_id = bps.sense_id
+                      AND other.language_id <> bps.language_id
+               ), 999) AS counterpart_len
           FROM best_per_sense bps
           JOIN sense s ON s.id = bps.sense_id
-          JOIN term t  ON t.id = bps.matched_term_id
-         ORDER BY bps.pri ASC, bps.len ASC
+          JOIN term t ON t.id = bps.matched_term_id
+         ORDER BY bps.pri ASC,
+                  CASE WHEN bps.pri = 0 THEN counterpart_words ELSE 0 END ASC,
+                  CASE WHEN bps.pri = 0 THEN counterpart_len ELSE 0 END ASC,
+                  bps.len ASC,
+                  bps.sense_id ASC
          LIMIT ?
         """
 

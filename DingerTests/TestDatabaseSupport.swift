@@ -32,7 +32,9 @@ enum TestDatabaseSupport {
                     (18, 1, 'geben::give'),
                     (19, 1, 'nehmen::take'),
                     (20, 1, 'finden::find'),
-                    (21, 1, 'bleiben::stay');
+                    (21, 1, 'bleiben::stay'),
+                    (22, 1, 'Carport::carport'),
+                    (23, 1, 'Abwurfwagen::car');
 
                 INSERT INTO sense (id, entry_id, position) VALUES
                     (1, 1, 0),
@@ -55,7 +57,9 @@ enum TestDatabaseSupport {
                     (18, 18, 0),
                     (19, 19, 0),
                     (20, 20, 0),
-                    (21, 21, 0);
+                    (21, 21, 0),
+                    (22, 22, 0),
+                    (23, 23, 0);
 
                 INSERT INTO term (id, sense_id, language_id, surface, headword, normalized, pos, gender) VALUES
                     (1, 1, 1, 'Haus {n}', 'Haus', 'haus', NULL, 'n'),
@@ -99,7 +103,11 @@ enum TestDatabaseSupport {
                     (39, 20, 1, 'finden', 'finden', 'finden', 'v/t', NULL),
                     (40, 20, 2, 'find', 'find', 'find', NULL, NULL),
                     (41, 21, 1, 'bleiben', 'bleiben', 'bleiben', 'v/i', NULL),
-                    (42, 21, 2, 'stay', 'stay', 'stay', NULL, NULL);
+                    (42, 21, 2, 'stay', 'stay', 'stay', NULL, NULL),
+                    (1001, 22, 1, 'Carport {m}', 'Carport', 'carport', NULL, 'm'),
+                    (1002, 22, 2, 'carport', 'carport', 'carport', NULL, NULL),
+                    (1003, 23, 1, 'Abwurfwagen {m}', 'Abwurfwagen', 'abwurfwagen', NULL, 'm'),
+                    (1004, 23, 2, 'car', 'car', 'car', NULL, NULL);
 
                 INSERT INTO term_fts(term_fts) VALUES('rebuild');
                 """)
