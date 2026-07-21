@@ -34,7 +34,7 @@ public nonisolated enum QuizDirectionMode: String, Codable, Hashable, Sendable, 
     }
 }
 
-public nonisolated struct QuizConfig: Sendable, Hashable {
+public nonisolated struct QuizConfig: Codable, Sendable, Hashable {
     public var mode: QuizMode
     public var direction: QuizDirectionMode
     public var maxQuestions: Int
@@ -60,7 +60,7 @@ public nonisolated struct QuizConfig: Sendable, Hashable {
     }
 }
 
-public nonisolated struct QuizProgress: Sendable, Hashable {
+public nonisolated struct QuizProgress: Codable, Sendable, Hashable {
     public let answered: Int
     public let total: Int
     public let correct: Int

@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import Dinger
+@testable import DingerCore
 
 final class DeckBackupTests: XCTestCase {
     func testAllDecksBackupRoundTripPreservesProgressAndHistory() async throws {

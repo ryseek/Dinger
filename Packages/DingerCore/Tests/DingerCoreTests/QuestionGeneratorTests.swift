@@ -1,5 +1,5 @@
 import XCTest
-@testable import Dinger
+@testable import DingerCore
 
 final class QuestionGeneratorTests: XCTestCase {
     func testMultipleChoiceGeneratesEightUniqueChoices() async throws {
@@ -65,8 +65,9 @@ final class QuestionGeneratorTests: XCTestCase {
         let question = try await generator.makeQuestion(for: questionCard, mode: .multipleChoice)
         let normalizedChoices = Set(question.choices.map(TextNormalizer.normalize))
 
-        XCTAssertTrue(normalizedChoices.contains("walk"))
-        XCTAssertTrue(normalizedChoices.isDisjoint(with: ["house", "tree", "cat", "fast", "c++"]))
+        let verbVocabulary: Set<String> = ["run", "walk", "know", "do", "say", "see", "give", "take", "find", "stay"]
+        XCTAssertEqual(normalizedChoices.count, 8)
+        XCTAssertTrue(normalizedChoices.isSubset(of: verbVocabulary))
     }
 
     func testMultipleChoiceExcludesAnotherValidTranslation() async throws {

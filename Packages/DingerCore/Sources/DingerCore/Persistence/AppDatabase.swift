@@ -46,9 +46,7 @@ public nonisolated final class AppDatabase: @unchecked Sendable {
         public var detail: String? {
             switch self {
             case .copyingExampleSentences(let copied, let total):
-                let formattedCopied = copied.formatted()
-                let formattedTotal = total.formatted()
-                return "\(formattedCopied) of \(formattedTotal)"
+                return "\(copied) of \(total)"
             default:
                 return nil
             }
@@ -112,6 +110,17 @@ public nonisolated final class AppDatabase: @unchecked Sendable {
     public static func makeShared(progress: ((StartupProgress) -> Void)? = nil) throws -> AppDatabase {
         let bundle = Bundle.main
         let url = try ensureOnDeviceSeed(in: bundle, progress: progress)
+        let database = try open(at: url, progress: progress)
+        try database.copyBundledExamplesIfNeeded(from: bundle, progress: progress)
+        progress?(.ready)
+        return database
+    }
+
+    /// Opens and migrates a writable database at an explicit path. Platform
+    /// frontends own resource extraction and file placement; the shared core
+    /// owns the schema and all database behavior.
+    public static func open(at url: URL,
+                            progress: ((StartupProgress) -> Void)? = nil) throws -> AppDatabase {
         var config = Configuration()
         config.prepareDatabase { db in
             try db.execute(sql: "PRAGMA foreign_keys = ON")
@@ -119,10 +128,7 @@ public nonisolated final class AppDatabase: @unchecked Sendable {
         progress?(.openingDatabase)
         let pool = try DatabasePool(path: url.path, configuration: config)
         progress?(.migratingSchema)
-        let database = try AppDatabase(pool)
-        try database.copyBundledExamplesIfNeeded(from: bundle, progress: progress)
-        progress?(.ready)
-        return database
+        return try AppDatabase(pool)
     }
 
     /// In-memory database used by previews / tests that don't need a seeded dict.

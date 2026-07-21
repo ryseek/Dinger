@@ -74,6 +74,12 @@ public nonisolated final class CardService: @unchecked Sendable {
         }
     }
 
+    public func deck(id: Int64) async throws -> Deck? {
+        try await database.dbWriter.read { db in
+            try Deck.fetchOne(db, key: id)
+        }
+    }
+
     public func createDeck(name: String, pair: LanguagePair) async throws -> Deck {
         try await database.dbWriter.write { db in
             var deck = Deck(name: name, sourceLang: pair.source, targetLang: pair.target)
@@ -575,6 +581,12 @@ public nonisolated final class CardService: @unchecked Sendable {
             try Card.filter(Column("deck_id") == deckId)
                 .order(Column("created_at").desc)
                 .fetchAll(db)
+        }
+    }
+
+    public func card(id: Int64) async throws -> Card? {
+        try await database.dbWriter.read { db in
+            try Card.fetchOne(db, key: id)
         }
     }
 

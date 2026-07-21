@@ -1,13 +1,15 @@
+import DingerCore
 import Foundation
 import XCTest
 @testable import Dinger
 
-final class QuizSettingsTests: XCTestCase {
+nonisolated final class QuizSettingsTests: XCTestCase {
+    @MainActor
     func testQuizStartSettingsAreRestored() async throws {
         let suiteName = "QuizSettingsTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
-        let database = try await TestDatabaseSupport.makeDatabase()
+        let database = try AppDatabase.makeEmptyInMemory()
         let service = CardService(database: database)
 
         let first = QuizStartViewModel(service: service, defaults: defaults)
@@ -30,11 +32,12 @@ final class QuizSettingsTests: XCTestCase {
         XCTAssertTrue(restored.practiceMode)
     }
 
+    @MainActor
     func testAllDecksSelectionIsRestored() async throws {
         let suiteName = "QuizSettingsTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
-        let database = try await TestDatabaseSupport.makeDatabase()
+        let database = try AppDatabase.makeEmptyInMemory()
         let service = CardService(database: database)
 
         let first = QuizStartViewModel(service: service, defaults: defaults)

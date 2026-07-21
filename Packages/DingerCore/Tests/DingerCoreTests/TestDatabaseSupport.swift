@@ -1,6 +1,6 @@
 import Foundation
 import GRDB
-@testable import Dinger
+@testable import DingerCore
 
 enum TestDatabaseSupport {
     static func makeDatabase() async throws -> AppDatabase {

@@ -1,3 +1,4 @@
+import DingerCore
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -15,7 +16,11 @@ struct DeckDetailView: View {
     init(env: AppEnvironment, deck: Deck) {
         self.env = env
         self.deck = deck
-        _vm = State(wrappedValue: DeckDetailViewModel(service: env.cardService, database: env.database, deck: deck))
+        _vm = State(wrappedValue: DeckDetailViewModel(
+            service: env.cardService,
+            insights: env.studyInsightsService,
+            deck: deck
+        ))
     }
 
     var body: some View {

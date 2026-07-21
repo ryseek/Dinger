@@ -8,7 +8,7 @@ public nonisolated enum QuestionKind: String, Codable, Hashable, Sendable {
 
 /// A single quiz prompt. For flashcard the user self-grades; for
 /// multiple choice and typing the engine derives a grade from the answer.
-public nonisolated struct Question: Identifiable, Hashable, Sendable {
+public nonisolated struct Question: Identifiable, Hashable, Codable, Sendable {
     public let id: Int64               // card id
     public let kind: QuestionKind
     public let front: String           // prompt surface

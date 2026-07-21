@@ -1,3 +1,4 @@
+import DingerCore
 import SwiftUI
 
 struct QuizPlayView: View {

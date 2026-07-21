@@ -1,3 +1,4 @@
+import DingerCore
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -20,7 +21,7 @@ struct CardsRootView: View {
         self.env = env
         _vm = State(wrappedValue: DeckListViewModel(
             service: env.cardService,
-            database: env.database,
+            insights: env.studyInsightsService,
             pair: env.defaultPair
         ))
     }

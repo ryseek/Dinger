@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import Dinger
+@testable import DingerCore
 
 final class CardServiceTests: XCTestCase {
     func testReplacingCardSensePreservesIdentityAndProgress() async throws {
@@ -137,22 +137,21 @@ final class CardServiceTests: XCTestCase {
         _ = try await service.grade(card: difficultCard, grade: .again, now: reviewedAt.addingTimeInterval(60))
         _ = try await service.grade(card: learnedCard, grade: .good, now: reviewedAt)
 
-        let viewModel = DeckDetailViewModel(service: service, database: database, deck: deck)
-        await viewModel.reload()
+        let statistics = try await StudyInsightsService(database: database).statistics(for: deck)
 
-        XCTAssertEqual(viewModel.statistics.totalCards, 2)
-        XCTAssertEqual(viewModel.statistics.reviewedCards, 2)
-        XCTAssertEqual(viewModel.statistics.reviewedFraction, 1)
-        XCTAssertEqual(viewModel.statistics.dueCards, 2)
-        XCTAssertEqual(viewModel.statistics.totalReviews, 3)
-        XCTAssertEqual(viewModel.statistics.totalRepetitions, 1)
-        XCTAssertEqual(viewModel.statistics.matureCards, 0)
-        XCTAssertEqual(viewModel.statistics.learningCards, 2)
-        XCTAssertEqual(viewModel.statistics.successfulReviews, 1)
-        XCTAssertEqual(viewModel.statistics.retentionRate, 1.0 / 3.0, accuracy: 0.001)
-        XCTAssertEqual(viewModel.statistics.hardestCards.first?.id, difficultCard.id)
-        XCTAssertEqual(viewModel.statistics.hardestCards.first?.againCount, 2)
-        XCTAssertEqual(viewModel.statistics.hardestCards.first?.reviewCount, 2)
+        XCTAssertEqual(statistics.totalCards, 2)
+        XCTAssertEqual(statistics.reviewedCards, 2)
+        XCTAssertEqual(statistics.reviewedFraction, 1)
+        XCTAssertEqual(statistics.dueCards, 2)
+        XCTAssertEqual(statistics.totalReviews, 3)
+        XCTAssertEqual(statistics.totalRepetitions, 1)
+        XCTAssertEqual(statistics.matureCards, 0)
+        XCTAssertEqual(statistics.learningCards, 2)
+        XCTAssertEqual(statistics.successfulReviews, 1)
+        XCTAssertEqual(statistics.retentionRate, 1.0 / 3.0, accuracy: 0.001)
+        XCTAssertEqual(statistics.hardestCards.first?.id, difficultCard.id)
+        XCTAssertEqual(statistics.hardestCards.first?.againCount, 2)
+        XCTAssertEqual(statistics.hardestCards.first?.reviewCount, 2)
     }
 
     func testDeckListActivitySummarizesTodayAndStreak() async throws {
@@ -166,17 +165,16 @@ final class CardServiceTests: XCTestCase {
 
         _ = try await service.grade(card: card, grade: .good, now: yesterday)
         _ = try await service.grade(card: card, grade: .again, now: now)
-        let viewModel = DeckListViewModel(service: service, database: database, pair: .deEN)
-        await viewModel.reload()
+        let activity = try await StudyInsightsService(database: database).activity(now: now)
 
-        XCTAssertEqual(viewModel.activity.activity(on: now)?.reviewCount, 1)
-        XCTAssertEqual(viewModel.activity.activity(on: now)?.correctCount, 0)
-        XCTAssertEqual(viewModel.activity.activity(on: yesterday)?.reviewCount, 1)
-        XCTAssertEqual(viewModel.activity.currentStreak, 2)
-        XCTAssertEqual(viewModel.activity.activity(on: yesterday)?.words.first?.front, "Haus {n}")
-        XCTAssertEqual(viewModel.activity.activity(on: yesterday)?.words.first?.isNew, true)
-        XCTAssertEqual(viewModel.activity.activity(on: now)?.words.first?.isNew, false)
-        XCTAssertEqual(viewModel.activity.activity(on: yesterday)?.words.first?.failedReviewCount, 0)
-        XCTAssertEqual(viewModel.activity.activity(on: now)?.words.first?.failedReviewCount, 1)
+        XCTAssertEqual(activity.activity(on: now)?.reviewCount, 1)
+        XCTAssertEqual(activity.activity(on: now)?.correctCount, 0)
+        XCTAssertEqual(activity.activity(on: yesterday)?.reviewCount, 1)
+        XCTAssertEqual(activity.currentStreak, 2)
+        XCTAssertEqual(activity.activity(on: yesterday)?.words.first?.front, "Haus {n}")
+        XCTAssertEqual(activity.activity(on: yesterday)?.words.first?.isNew, true)
+        XCTAssertEqual(activity.activity(on: now)?.words.first?.isNew, false)
+        XCTAssertEqual(activity.activity(on: yesterday)?.words.first?.failedReviewCount, 0)
+        XCTAssertEqual(activity.activity(on: now)?.words.first?.failedReviewCount, 1)
     }
 }

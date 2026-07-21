@@ -1,3 +1,4 @@
+import DingerCore
 //
 //  DingerApp.swift
 //  Dinger

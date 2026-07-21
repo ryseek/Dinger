@@ -7,8 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		AA33333333333333333333AA /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = AA22222222222222222222AA /* GRDB */; };
-		CC000000000000000000000C /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = AA22222222222222222222AA /* GRDB */; };
+		DD33333333333333333333DD /* DingerCore in Frameworks */ = {isa = PBXBuildFile; productRef = DD22222222222222222222DD /* DingerCore */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -44,7 +43,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				AA33333333333333333333AA /* GRDB in Frameworks */,
+				DD33333333333333333333DD /* DingerCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -52,7 +51,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				CC000000000000000000000C /* GRDB in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -97,7 +95,7 @@
 			);
 			name = Dinger;
 			packageProductDependencies = (
-				AA22222222222222222222AA /* GRDB */,
+				DD22222222222222222222DD /* DingerCore */,
 			);
 			productName = Dinger;
 			productReference = B99555392F9698BF00CC9867 /* Dinger.app */;
@@ -121,7 +119,6 @@
 			);
 			name = DingerTests;
 			packageProductDependencies = (
-				AA22222222222222222222AA /* GRDB */,
 			);
 			productName = DingerTests;
 			productReference = CC0000000000000000000001 /* DingerTests.xctest */;
@@ -156,7 +153,7 @@
 			mainGroup = B99555302F9698BF00CC9867;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				AA11111111111111111111AA /* XCRemoteSwiftPackageReference "GRDB" */,
+				DD11111111111111111111DD /* XCLocalSwiftPackageReference "Packages/DingerCore" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = B995553A2F9698BF00CC9867 /* Products */;
@@ -494,22 +491,18 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCRemoteSwiftPackageReference section */
-		AA11111111111111111111AA /* XCRemoteSwiftPackageReference "GRDB" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/groue/GRDB.swift";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 7.0.0;
-			};
+/* Begin XCLocalSwiftPackageReference section */
+		DD11111111111111111111DD /* XCLocalSwiftPackageReference "Packages/DingerCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/DingerCore;
 		};
-/* End XCRemoteSwiftPackageReference section */
+/* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		AA22222222222222222222AA /* GRDB */ = {
+		DD22222222222222222222DD /* DingerCore */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = AA11111111111111111111AA /* XCRemoteSwiftPackageReference "GRDB" */;
-			productName = GRDB;
+			package = DD11111111111111111111DD /* XCLocalSwiftPackageReference "Packages/DingerCore" */;
+			productName = DingerCore;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

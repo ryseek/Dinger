@@ -1,5 +1,5 @@
 import XCTest
-@testable import Dinger
+@testable import DingerCore
 
 final class DictionarySearchServiceTests: XCTestCase {
     func testNormalWordAndPhraseSearchesStillWork() async throws {

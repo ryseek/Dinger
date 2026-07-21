@@ -1,3 +1,4 @@
+import DingerCore
 import Foundation
 import SwiftUI
 
@@ -10,6 +11,7 @@ public final class AppEnvironment {
     public let exampleSentenceService: ExampleSentenceService
     public let historyService: DictionaryHistoryService
     public let cardService: CardService
+    public let studyInsightsService: StudyInsightsService
     public let defaultPair: LanguagePair
     public var lastUsedDeckId: Int64?
 
@@ -19,6 +21,7 @@ public final class AppEnvironment {
         self.exampleSentenceService = ExampleSentenceService(database: database)
         self.historyService = DictionaryHistoryService(database: database)
         self.cardService = CardService(database: database)
+        self.studyInsightsService = StudyInsightsService(database: database)
         self.defaultPair = defaultPair
     }
 }

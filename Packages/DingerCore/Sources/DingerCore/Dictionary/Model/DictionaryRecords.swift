@@ -164,7 +164,7 @@ public nonisolated struct Term: Codable, Identifiable, FetchableRecord, MutableP
 
 // MARK: - Aggregate display types (NOT tables)
 
-public nonisolated struct TermDisplay: Hashable, Sendable {
+public nonisolated struct TermDisplay: Hashable, Codable, Sendable {
     public let termId: Int64
     public let surface: String
     public let headword: String
@@ -185,7 +185,7 @@ public nonisolated struct TermDisplay: Hashable, Sendable {
 /// One search result = one sense with its terms on both sides, plus
 /// which term actually matched the query. Everything a card or detail
 /// view needs is embedded.
-public nonisolated struct SenseHit: Identifiable, Hashable, Sendable {
+public nonisolated struct SenseHit: Identifiable, Hashable, Codable, Sendable {
     public var id: Int64 { senseId }
     public let senseId: Int64
     public let entryId: Int64
@@ -218,7 +218,7 @@ public nonisolated struct SenseHit: Identifiable, Hashable, Sendable {
     }
 }
 
-public nonisolated struct ExampleSentence: Identifiable, Hashable, Sendable {
+public nonisolated struct ExampleSentence: Identifiable, Hashable, Codable, Sendable {
     public let id: Int64
     public let germanTatoebaId: Int64
     public let englishTatoebaId: Int64
