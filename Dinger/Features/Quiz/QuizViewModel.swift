@@ -110,6 +110,20 @@ public final class QuizPlayViewModel {
     public var typedAnswer: String = ""
     public var selectedChoice: Int?
 
+    /// Human-facing position of the question currently on screen. `answered`
+    /// remains a completed-answer count for results and persistence.
+    public var questionNumber: Int {
+        guard progress.total > 0 else { return 0 }
+        switch phase {
+        case .question, .reveal:
+            return min(progress.answered + 1, progress.total)
+        case .done:
+            return min(progress.answered, progress.total)
+        case .loading, .empty, .error:
+            return progress.answered
+        }
+    }
+
     private let session: QuizSession
 
     public init(session: QuizSession) {

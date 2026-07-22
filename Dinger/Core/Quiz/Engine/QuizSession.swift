@@ -25,6 +25,7 @@ public nonisolated final class QuizSession: @unchecked Sendable {
 
     private struct State {
         var answered = 0
+        var total = 0
         var correct = 0
         var perGrade = [Grade: Int]()
         var startedAt: Date = .distantPast
@@ -46,7 +47,7 @@ public nonisolated final class QuizSession: @unchecked Sendable {
     public var progress: QuizProgress {
         QuizProgress(
             answered: state.answered,
-            total: queue.count + state.answered,
+            total: state.total,
             correct: state.correct,
             again: state.perGrade[.again] ?? 0,
             hard:  state.perGrade[.hard]  ?? 0,
@@ -78,6 +79,7 @@ public nonisolated final class QuizSession: @unchecked Sendable {
             card.id.map { ($0, card) }
         })
         state = State()
+        state.total = queue.count
         state.startedAt = Date()
     }
 

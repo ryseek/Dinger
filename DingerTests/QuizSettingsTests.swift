@@ -3,6 +3,27 @@ import XCTest
 @testable import Dinger
 
 final class QuizSettingsTests: XCTestCase {
+    func testActiveQuizShowsCurrentQuestionOutOfStableTotal() async throws {
+        let database = try await TestDatabaseSupport.makeDatabase()
+        let service = CardService(database: database)
+        let deck = try await service.createDeck(name: "Study", pair: .deEN)
+        _ = try await TestDatabaseSupport.card("Haus", deck: deck, service: service, database: database)
+        _ = try await TestDatabaseSupport.card("Baum", deck: deck, service: service, database: database)
+        let session = QuizSession(
+            decks: [deck],
+            config: QuizConfig(mode: .flashcard, maxQuestions: 2, practiceMode: true),
+            cardService: service,
+            reader: database.dbWriter
+        )
+        let viewModel = QuizPlayViewModel(session: session)
+
+        await viewModel.start()
+
+        XCTAssertEqual(viewModel.progress.answered, 0)
+        XCTAssertEqual(viewModel.progress.total, 2)
+        XCTAssertEqual(viewModel.questionNumber, 1)
+    }
+
     func testQuizStartSettingsAreRestored() async throws {
         let suiteName = "QuizSettingsTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))

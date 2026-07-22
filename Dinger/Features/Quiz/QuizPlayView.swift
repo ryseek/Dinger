@@ -56,9 +56,9 @@ struct QuizPlayView: View {
 
     private var progressBar: some View {
         HStack {
-            ProgressView(value: Double(vm.progress.answered),
+            ProgressView(value: Double(vm.questionNumber),
                          total: Double(max(1, vm.progress.total)))
-            Text("\(vm.progress.answered)/\(vm.progress.total)")
+            Text("\(vm.questionNumber)/\(vm.progress.total)")
                 .font(.caption).monospacedDigit()
         }
     }
