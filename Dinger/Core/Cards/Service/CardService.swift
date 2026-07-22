@@ -218,6 +218,7 @@ public nonisolated final class CardService: @unchecked Sendable {
                             suspended: exportedCard.suspended)
             try card.insert(db)
             guard let cardId = card.id else { throw CardServiceError.invalidDeckFile }
+            try CardDictionaryReferenceStore.refresh(cardId: cardId, db: db)
 
             let srs = exportedCard.srs
             try CardSRS(cardId: cardId,
@@ -290,6 +291,9 @@ public nonisolated final class CardService: @unchecked Sendable {
                 updated.backTermId = back[0].termId
                 updated.frontTermIdsRaw = frontIdsRaw
                 updated.backTermIdsRaw = backIdsRaw
+                if let cardId = updated.id {
+                    try CardDictionaryReferenceStore.refresh(cardId: cardId, db: db)
+                }
                 return CardCreationResult(card: updated, isNew: false, didUpdate: true)
             }
 
@@ -303,6 +307,7 @@ public nonisolated final class CardService: @unchecked Sendable {
                 direction: direction
             )
             try card.insert(db)
+            try CardDictionaryReferenceStore.refresh(cardId: card.id!, db: db)
 
             let srs = CardSRS(cardId: card.id!)
             try srs.insert(db)
@@ -390,6 +395,7 @@ public nonisolated final class CardService: @unchecked Sendable {
                 throw CardServiceError.senseNotFound
             }
             updated.id = cardId
+            try CardDictionaryReferenceStore.refresh(cardId: cardId, db: db)
             return CardReplacementResult(card: updated)
         }
     }
@@ -413,8 +419,8 @@ public nonisolated final class CardService: @unchecked Sendable {
         guard let cardId = card.id else { throw CardServiceError.invalidDeckFile }
         guard let senseRow = try Row.fetchOne(db, sql: """
             SELECT e.raw AS entry_raw, s.position AS sense_position
-              FROM sense s
-              JOIN entry e ON e.id = s.entry_id
+              FROM dict.sense s
+              JOIN dict.entry e ON e.id = s.entry_id
              WHERE s.id = ?
             """, arguments: [card.senseId]) else {
             throw CardServiceError.senseNotFound
@@ -502,8 +508,8 @@ public nonisolated final class CardService: @unchecked Sendable {
                        t.normalized,
                        t.pos,
                        t.gender
-                  FROM term t
-                  JOIN language l ON l.id = t.language_id
+                  FROM dict.term t
+                  JOIN dict.language l ON l.id = t.language_id
                  WHERE t.id = ? AND t.sense_id = ?
                 """, arguments: [termId, senseId]) else {
                 throw CardServiceError.selectedTermNotFound
@@ -523,9 +529,9 @@ public nonisolated final class CardService: @unchecked Sendable {
     private nonisolated static func hasDictionary(db: Database, sourceLang: String, targetLang: String) throws -> Bool {
         let count = try Int.fetchOne(db, sql: """
             SELECT COUNT(*)
-              FROM dictionary d
-              JOIN language sl ON sl.id = d.source_lang_id
-              JOIN language tl ON tl.id = d.target_lang_id
+              FROM dict.dictionary d
+              JOIN dict.language sl ON sl.id = d.source_lang_id
+              JOIN dict.language tl ON tl.id = d.target_lang_id
              WHERE sl.code = ? AND tl.code = ?
             """, arguments: [sourceLang, targetLang]) ?? 0
         return count > 0
@@ -534,11 +540,11 @@ public nonisolated final class CardService: @unchecked Sendable {
     private nonisolated static func resolveSenseId(db: Database, key: ExportedSenseKey) throws -> Int64 {
         let ids = try Int64.fetchAll(db, sql: """
             SELECT s.id
-              FROM sense s
-              JOIN entry e ON e.id = s.entry_id
-              JOIN dictionary d ON d.id = e.dictionary_id
-              JOIN language sl ON sl.id = d.source_lang_id
-              JOIN language tl ON tl.id = d.target_lang_id
+              FROM dict.sense s
+              JOIN dict.entry e ON e.id = s.entry_id
+              JOIN dict.dictionary d ON d.id = e.dictionary_id
+              JOIN dict.language sl ON sl.id = d.source_lang_id
+              JOIN dict.language tl ON tl.id = d.target_lang_id
              WHERE sl.code = ?
                AND tl.code = ?
                AND e.raw = ?
@@ -555,8 +561,8 @@ public nonisolated final class CardService: @unchecked Sendable {
         try terms.map { term in
             let ids = try Int64.fetchAll(db, sql: """
                 SELECT t.id
-                  FROM term t
-                  JOIN language l ON l.id = t.language_id
+                  FROM dict.term t
+                  JOIN dict.language l ON l.id = t.language_id
                  WHERE t.sense_id = ?
                    AND l.code = ?
                    AND t.surface = ?
@@ -620,6 +626,7 @@ public nonisolated final class CardService: @unchecked Sendable {
             var updated = card
             updated.frontTextOverride = cleanedFront
             updated.backTextOverride = cleanedBack
+            try CardDictionaryReferenceStore.refresh(cardId: cardId, db: db)
             return updated
         }
     }
@@ -739,6 +746,7 @@ public nonisolated final class CardService: @unchecked Sendable {
             updated.frontTextOverride = card.backTextOverride
             updated.backTextOverride = card.frontTextOverride
             updated.direction   = newDirection
+            try CardDictionaryReferenceStore.refresh(cardId: cardId, db: db)
             return updated
         }
     }

@@ -29,8 +29,8 @@ public nonisolated final class ExampleSentenceService: @unchecked Sendable {
         guard limit > 0,
               let term = try Row.fetchOne(db, sql: """
                   SELECT t.normalized, l.code AS language_code
-                    FROM term t
-                    JOIN language l ON l.id = t.language_id
+                    FROM dict.term t
+                    JOIN dict.language l ON l.id = t.language_id
                    WHERE t.id = ?
                   """, arguments: [termId]) else {
             return []
@@ -56,8 +56,8 @@ public nonisolated final class ExampleSentenceService: @unchecked Sendable {
                        PARTITION BY \(duplicateExpression)
                        ORDER BY f.rank, \(lengthExpression), e.id
                    ) AS duplicate_rank
-              FROM example_sentence_fts f
-              JOIN example_sentence e ON e.id = f.rowid
+              FROM dict.example_sentence_fts f
+              JOIN dict.example_sentence e ON e.id = f.rowid
              WHERE example_sentence_fts MATCH ?
             )
             SELECT id,

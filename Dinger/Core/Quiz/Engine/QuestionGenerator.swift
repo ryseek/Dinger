@@ -208,7 +208,7 @@ public nonisolated final class QuestionGenerator: @unchecked Sendable {
             // one that has a gender (noun) or POS set. English terms are
             // usually unmarked, so we look across both sides of the sense.
             let markers = try Row.fetchAll(db, sql: """
-                SELECT pos, gender FROM term WHERE sense_id = ?
+                SELECT pos, gender FROM dict.term WHERE sense_id = ?
                 """, arguments: [card.senseId])
             var pos: String? = nil
             var gender: String? = nil
@@ -239,8 +239,8 @@ public nonisolated final class QuestionGenerator: @unchecked Sendable {
         guard !termIds.isEmpty else { return [] }
         return try termIds.compactMap { termId in
             guard let surface = try String.fetchOne(db, sql: """
-                SELECT t.surface FROM term t
-                JOIN language l ON l.id = t.language_id
+                SELECT t.surface FROM dict.term t
+                JOIN dict.language l ON l.id = t.language_id
                 WHERE t.id = ? AND l.code = ?
                 """, arguments: [termId, languageCode]) else {
                 return nil
@@ -274,19 +274,19 @@ public nonisolated final class QuestionGenerator: @unchecked Sendable {
                     SELECT DISTINCT t.surface,
                            EXISTS (
                                SELECT 1
-                                 FROM term clue
-                                 JOIN language clue_language ON clue_language.id = clue.language_id
+                                 FROM dict.term clue
+                                 JOIN dict.language clue_language ON clue_language.id = clue.language_id
                                 WHERE clue.sense_id = t.sense_id
                                   AND clue_language.code = ?
                                   AND clue.normalized = ?
                            ) AS semantic_match
                       FROM card c
-                      JOIN term t ON t.sense_id = c.sense_id
-                      JOIN language l ON l.id = t.language_id
+                      JOIN dict.term t ON t.sense_id = c.sense_id
+                      JOIN dict.language l ON l.id = t.language_id
                      WHERE c.sense_id != ?
                        AND l.code = ?
                        AND c.sense_id IN (
-                           SELECT sense_id FROM term WHERE \(cond)
+                           SELECT sense_id FROM dict.term WHERE \(cond)
                        )
                      ORDER BY RANDOM()
                      LIMIT ?
@@ -297,18 +297,18 @@ public nonisolated final class QuestionGenerator: @unchecked Sendable {
                     SELECT t.surface,
                            EXISTS (
                                SELECT 1
-                                 FROM term clue
-                                 JOIN language clue_language ON clue_language.id = clue.language_id
+                                 FROM dict.term clue
+                                 JOIN dict.language clue_language ON clue_language.id = clue.language_id
                                 WHERE clue.sense_id = t.sense_id
                                   AND clue_language.code = ?
                                   AND clue.normalized = ?
                            ) AS semantic_match
-                      FROM term t
-                    JOIN language l ON l.id = t.language_id
+                      FROM dict.term t
+                    JOIN dict.language l ON l.id = t.language_id
                     WHERE l.code = ?
                       AND t.sense_id != ?
                       AND t.sense_id IN (
-                          SELECT sense_id FROM term WHERE \(cond)
+                          SELECT sense_id FROM dict.term WHERE \(cond)
                       )
                     ORDER BY RANDOM()
                     LIMIT ?
@@ -319,15 +319,15 @@ public nonisolated final class QuestionGenerator: @unchecked Sendable {
                     SELECT DISTINCT t.surface,
                            EXISTS (
                                SELECT 1
-                                 FROM term clue
-                                 JOIN language clue_language ON clue_language.id = clue.language_id
+                                 FROM dict.term clue
+                                 JOIN dict.language clue_language ON clue_language.id = clue.language_id
                                 WHERE clue.sense_id = t.sense_id
                                   AND clue_language.code = ?
                                   AND clue.normalized = ?
                            ) AS semantic_match
                       FROM card c
-                      JOIN term t ON t.sense_id = c.sense_id
-                      JOIN language l ON l.id = t.language_id
+                      JOIN dict.term t ON t.sense_id = c.sense_id
+                      JOIN dict.language l ON l.id = t.language_id
                      WHERE c.sense_id != ? AND l.code = ?
                      ORDER BY RANDOM()
                      LIMIT ?
@@ -337,14 +337,14 @@ public nonisolated final class QuestionGenerator: @unchecked Sendable {
                     SELECT t.surface,
                            EXISTS (
                                SELECT 1
-                                 FROM term clue
-                                 JOIN language clue_language ON clue_language.id = clue.language_id
+                                 FROM dict.term clue
+                                 JOIN dict.language clue_language ON clue_language.id = clue.language_id
                                 WHERE clue.sense_id = t.sense_id
                                   AND clue_language.code = ?
                                   AND clue.normalized = ?
                            ) AS semantic_match
-                      FROM term t
-                    JOIN language l ON l.id = t.language_id
+                      FROM dict.term t
+                    JOIN dict.language l ON l.id = t.language_id
                     WHERE l.code = ? AND t.sense_id != ?
                     ORDER BY RANDOM()
                     LIMIT ?

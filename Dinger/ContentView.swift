@@ -8,18 +8,21 @@ struct ContentView: View {
             switch bootstrap.state {
             case .loading:
                 VStack(spacing: 12) {
-                    if let fraction = bootstrap.progress.fractionCompleted {
+                    if bootstrap.showsProgressDetails,
+                       let fraction = bootstrap.progress.fractionCompleted {
                         ProgressView(value: fraction)
                             .frame(maxWidth: 220)
                     } else {
                         ProgressView()
                     }
-                    Text(bootstrap.progress.title)
-                        .font(.headline)
-                    if let detail = bootstrap.progress.detail {
-                        Text(detail)
-                            .font(.footnote.monospacedDigit())
-                            .foregroundStyle(.secondary)
+                    if bootstrap.showsProgressDetails {
+                        Text(bootstrap.progress.title)
+                            .font(.headline)
+                        if let detail = bootstrap.progress.detail {
+                            Text(detail)
+                                .font(.footnote.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
                 .multilineTextAlignment(.center)

@@ -78,8 +78,8 @@ public nonisolated final class DictionarySearchService: @unchecked Sendable {
 
     private func resolveLanguageIds(pair: LanguagePair) async throws -> LanguageIds {
         try await reader.read { db in
-            let source = try Int64.fetchOne(db, sql: "SELECT id FROM language WHERE code = ?", arguments: [pair.source])
-            let target = try Int64.fetchOne(db, sql: "SELECT id FROM language WHERE code = ?", arguments: [pair.target])
+            let source = try Int64.fetchOne(db, sql: "SELECT id FROM dict.language WHERE code = ?", arguments: [pair.source])
+            let target = try Int64.fetchOne(db, sql: "SELECT id FROM dict.language WHERE code = ?", arguments: [pair.target])
             guard let source, let target else { throw DictionarySearchError.languageNotFound(pair.displayLabel) }
             return LanguageIds(source: source, target: target)
         }
@@ -102,7 +102,7 @@ public nonisolated final class DictionarySearchService: @unchecked Sendable {
                     SELECT language_id,
                            SUM(CASE WHEN normalized = ? THEN 1 ELSE 0 END) AS exact_count,
                            COUNT(*) AS prefix_count
-                      FROM term
+                      FROM dict.term
                      WHERE language_id IN (?, ?)
                        AND normalized LIKE ? ESCAPE '^'
                      GROUP BY language_id
@@ -171,27 +171,27 @@ public nonisolated final class DictionarySearchService: @unchecked Sendable {
         let sql = """
         WITH ranked AS (
             SELECT t.id AS term_id, t.sense_id, t.language_id, 0 AS pri, LENGTH(t.headword) AS len
-              FROM term t
+              FROM dict.term t
              WHERE t.normalized = ?\(langClause)
 
             UNION ALL
 
             SELECT t.id, t.sense_id, t.language_id, 1, LENGTH(t.headword)
-              FROM term t
+              FROM dict.term t
              WHERE t.normalized LIKE ? ESCAPE '^'
                AND t.normalized <> ?\(langClause)
 
             UNION ALL
 
             SELECT t.id, t.sense_id, t.language_id, 2, LENGTH(t.headword)
-              FROM term t
-              JOIN term_fts f ON f.rowid = t.id
+              FROM dict.term t
+              JOIN dict.term_fts f ON f.rowid = t.id
              WHERE ? AND term_fts MATCH ?\(langClause)
 
             UNION ALL
 
             SELECT t.id, t.sense_id, t.language_id, 3, LENGTH(t.headword)
-              FROM term t
+              FROM dict.term t
              WHERE t.normalized LIKE ? ESCAPE '^'
                AND t.normalized NOT LIKE ? ESCAPE '^'\(langClause)
         ),
@@ -214,19 +214,19 @@ public nonisolated final class DictionarySearchService: @unchecked Sendable {
                COALESCE((
                    SELECT MIN(LENGTH(TRIM(other.normalized))
                               - LENGTH(REPLACE(TRIM(other.normalized), ' ', '')) + 1)
-                     FROM term other
+                     FROM dict.term other
                     WHERE other.sense_id = bps.sense_id
                       AND other.language_id <> bps.language_id
                ), 999) AS counterpart_words,
                COALESCE((
                    SELECT MIN(LENGTH(other.headword))
-                     FROM term other
+                     FROM dict.term other
                     WHERE other.sense_id = bps.sense_id
                       AND other.language_id <> bps.language_id
                ), 999) AS counterpart_len
           FROM best_per_sense bps
-          JOIN sense s ON s.id = bps.sense_id
-          JOIN term t ON t.id = bps.matched_term_id
+          JOIN dict.sense s ON s.id = bps.sense_id
+          JOIN dict.term t ON t.id = bps.matched_term_id
          ORDER BY bps.pri ASC,
                   CASE WHEN bps.pri = 0 THEN counterpart_words ELSE 0 END ASC,
                   CASE WHEN bps.pri = 0 THEN counterpart_len ELSE 0 END ASC,
@@ -279,7 +279,7 @@ public nonisolated final class DictionarySearchService: @unchecked Sendable {
                                       overrideRank: Int? = nil) throws -> SenseHit? {
         guard let senseRow = try Row.fetchOne(db, sql: """
             SELECT s.id, s.entry_id, s.domain, s.context
-              FROM sense s WHERE s.id = ?
+              FROM dict.sense s WHERE s.id = ?
             """, arguments: [senseId]) else { return nil }
 
         let entryId: Int64 = senseRow["entry_id"]
@@ -289,7 +289,7 @@ public nonisolated final class DictionarySearchService: @unchecked Sendable {
         let termRows = try Row.fetchAll(db, sql: """
             SELECT t.id, t.language_id, t.surface, t.headword, t.pos, t.gender,
                    l.code AS lang_code
-              FROM term t JOIN language l ON l.id = t.language_id
+              FROM dict.term t JOIN dict.language l ON l.id = t.language_id
              WHERE t.sense_id = ?
              ORDER BY t.id
             """, arguments: [senseId])

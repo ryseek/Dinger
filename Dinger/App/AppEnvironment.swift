@@ -23,8 +23,9 @@ public final class AppEnvironment {
     }
 }
 
-/// Bootstrap loader. On first launch this kicks off the seed copy and
-/// migrations off the main actor; the UI shows a splash until it resolves.
+/// Bootstrap loader. It prepares the small user database, performs the
+/// one-time legacy cutover when needed, and opens the bundled dictionary off
+/// the main actor; the UI shows a splash until it resolves.
 @Observable
 @MainActor
 public final class AppBootstrap {
@@ -56,6 +57,7 @@ public final class AppBootstrap {
 
     public var state: State = .loading
     public var progress = Progress()
+    public var showsProgressDetails = false
 
     public func load() async {
         let stream = AsyncStream<BootstrapEvent> { continuation in
@@ -75,6 +77,7 @@ public final class AppBootstrap {
         for await event in stream {
             switch event {
             case .progress(let step):
+                showsProgressDetails = true
                 progress = Progress(
                     title: step.title,
                     detail: step.detail,

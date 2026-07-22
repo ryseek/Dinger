@@ -1,6 +1,6 @@
 # Dictionary storage size findings
 
-Status: nice-to-have architecture work; no application change is included in this note.
+Status: split immutable/mutable storage implemented in the application.
 
 Date investigated: 2026-07-22
 
@@ -16,9 +16,9 @@ The observed iPhone storage report was:
 | Documents & Data | 373.5 MB |
 | Total | 762.3 MB |
 
-The bundled `Dinger/Resources/de-en.sqlite` file is 352 MiB (about 369 MB in decimal units). It accounts for nearly all of **App Size**. On first launch, `AppDatabase.ensureOnDeviceSeed` copies the complete seed database to `Application Support/Dinger/dinger.sqlite`, accounting for nearly all of **Documents & Data**. The remaining space is the executable, assets, user records, and potentially SQLite WAL/SHM files.
+The bundled `Dinger/Resources/de-en.sqlite` file is 352 MiB (about 369 MB in decimal units). It accounts for nearly all of **App Size**. Before the split-storage cutover, `AppDatabase.ensureOnDeviceSeed` copied the complete seed database to `Application Support/Dinger/dinger.sqlite`, accounting for nearly all of **Documents & Data**. The remaining space was the executable, assets, user records, and potentially SQLite WAL/SHM files.
 
-Relevant implementation: `Dinger/Core/Persistence/AppDatabase.swift`, particularly `ensureOnDeviceSeed` around lines 94–108.
+The replacement implementation is in `Dinger/Core/Persistence/AppDatabase.swift`, `UserDatabaseSchema.swift`, and `LegacyDatabaseImporter.swift`.
 
 ## Actual seed database composition
 
@@ -78,6 +78,38 @@ The seed's dictionary IDs must remain stable. A future compact-database rebuild 
 
 Expected benefit: recover approximately 370 MB from **Documents & Data**. The bundled app would still contain the 352 MiB seed until the seed itself is optimized.
 
+### Implemented cutover
+
+The app now uses this layout:
+
+- bundled `de-en.sqlite`, attached to every GRDB connection as the immutable,
+  read-only `dict` schema;
+- Application Support `Dinger/user.sqlite`, containing only user-owned tables;
+- `Dinger/dinger.sqlite`, recognized only as the legacy migration source.
+
+Fresh installs create `user.sqlite` directly at `UserDatabaseSchema.currentVersion`
+in one transaction. They do not run the legacy application migration chain. Future
+split-schema upgrades are versioned separately and apply only to existing user
+databases older than the current version.
+
+Legacy installs are imported into `user.sqlite.migrating`. The importer checkpoints
+and validates the legacy database, detects optional historical card columns, copies
+all user tables with their primary keys, semantically remaps dictionary references,
+validates row counts and foreign keys, and atomically activates the new database.
+The old monolithic database is retained during that launch and removed only after a
+later successful open. A failed or interrupted import leaves the legacy database
+untouched and restarts from a disposable migration file.
+
+Cards also receive a compact, versioned semantic dictionary-reference payload. The
+numeric sense and term IDs remain runtime caches, while the payload allows a later
+dictionary rebuild to remap those IDs after the legacy database has been deleted.
+
+Routine startup validates only `main` (the small user database) with
+`PRAGMA main.quick_check`. This qualification is important: an unqualified
+`quick_check` also scans attached databases and added roughly 0.8 seconds by reading
+the full bundled dictionary on every launch. The dictionary attachment itself is
+still checked for its required schema and metadata row.
+
 ## Option 2: separate example sentences
 
 Move example sentences into an optional downloadable/read-only database. This removes roughly 150 MiB from the base seed and lets users remove the pack independently.
@@ -135,4 +167,3 @@ sqlite3 -header -column Dinger/Resources/de-en.sqlite \
 2. Make example sentences a separate optional pack.
 3. Rebuild and benchmark a compact seed against existing dictionary-search tests.
 4. Measure Release/App Store installation size, first-launch migration time, and peak temporary disk usage on a physical device.
-

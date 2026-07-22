@@ -7,11 +7,11 @@ enum TestDatabaseSupport {
         let database = try AppDatabase.makeEmptyInMemory()
         try await database.dbWriter.write { db in
             try db.execute(sql: """
-                INSERT INTO language (id, code) VALUES (1, 'de'), (2, 'en');
-                INSERT INTO dictionary (id, source_lang_id, target_lang_id, version, name)
+                INSERT INTO dict.language (id, code) VALUES (1, 'de'), (2, 'en');
+                INSERT INTO dict.dictionary (id, source_lang_id, target_lang_id, version, name)
                 VALUES (1, 1, 2, 'test', 'Test Dictionary');
 
-                INSERT INTO entry (id, dictionary_id, raw) VALUES
+                INSERT INTO dict.entry (id, dictionary_id, raw) VALUES
                     (1, 1, 'Haus::house'),
                     (2, 1, 'Baum::tree'),
                     (3, 1, 'Katze::cat'),
@@ -36,7 +36,7 @@ enum TestDatabaseSupport {
                     (22, 1, 'Carport::carport'),
                     (23, 1, 'Abwurfwagen::car');
 
-                INSERT INTO sense (id, entry_id, position) VALUES
+                INSERT INTO dict.sense (id, entry_id, position) VALUES
                     (1, 1, 0),
                     (2, 2, 0),
                     (3, 3, 0),
@@ -61,7 +61,7 @@ enum TestDatabaseSupport {
                     (22, 22, 0),
                     (23, 23, 0);
 
-                INSERT INTO term (id, sense_id, language_id, surface, headword, normalized, pos, gender) VALUES
+                INSERT INTO dict.term (id, sense_id, language_id, surface, headword, normalized, pos, gender) VALUES
                     (1, 1, 1, 'Haus {n}', 'Haus', 'haus', NULL, 'n'),
                     (2, 1, 2, 'house', 'house', 'house', NULL, NULL),
                     (3, 2, 1, 'Baum {m}', 'Baum', 'baum', NULL, 'm'),
@@ -109,7 +109,7 @@ enum TestDatabaseSupport {
                     (1003, 23, 1, 'Abwurfwagen {m}', 'Abwurfwagen', 'abwurfwagen', NULL, 'm'),
                     (1004, 23, 2, 'car', 'car', 'car', NULL, NULL);
 
-                INSERT INTO term_fts(term_fts) VALUES('rebuild');
+                INSERT INTO dict.term_fts(term_fts) VALUES('rebuild');
                 """)
         }
         return database

@@ -106,7 +106,7 @@ final class CardServiceTests: XCTestCase {
         )
         try await database.dbWriter.write { db in
             try db.execute(sql: """
-                INSERT INTO term (id, sense_id, language_id, surface, headword, normalized, pos, gender)
+                INSERT INTO dict.term (id, sense_id, language_id, surface, headword, normalized, pos, gender)
                 VALUES
                     (43, 1, 1, 'Gebäude {n}', 'Gebäude', 'gebaude', NULL, 'n'),
                     (44, 1, 2, 'home', 'home', 'home', NULL, NULL)
@@ -154,7 +154,7 @@ final class CardServiceTests: XCTestCase {
         )
         try await database.dbWriter.write { db in
             try db.execute(sql: """
-                INSERT INTO term (id, sense_id, language_id, surface, headword, normalized)
+                INSERT INTO dict.term (id, sense_id, language_id, surface, headword, normalized)
                 VALUES (43, 2, 2, 'wood', 'wood', 'wood')
                 """)
         }

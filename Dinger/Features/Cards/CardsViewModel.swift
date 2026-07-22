@@ -143,8 +143,8 @@ public final class DeckListViewModel {
                   FROM review_log r
                   JOIN card c ON c.id = r.card_id
                   JOIN deck d ON d.id = c.deck_id
-                  LEFT JOIN term tf ON tf.id = c.front_term_id
-                  LEFT JOIN term tb ON tb.id = c.back_term_id
+                  LEFT JOIN dict.term tf ON tf.id = c.front_term_id
+                  LEFT JOIN dict.term tb ON tb.id = c.back_term_id
                  WHERE r.reviewed_at >= ?
                  ORDER BY r.reviewed_at ASC
                 """, arguments: [cutoff])
@@ -420,8 +420,8 @@ public final class DeckDetailViewModel {
                        (SELECT COUNT(*) FROM review_log r
                          WHERE r.card_id = c.id AND r.grade != ?) AS successful_review_count
                   FROM card c
-                  LEFT JOIN term tf ON tf.id = c.front_term_id
-                  LEFT JOIN term tb ON tb.id = c.back_term_id
+                  LEFT JOIN dict.term tf ON tf.id = c.front_term_id
+                  LEFT JOIN dict.term tb ON tb.id = c.back_term_id
                   LEFT JOIN card_srs s ON s.card_id = c.id
                  WHERE c.deck_id = ?
                  ORDER BY c.created_at DESC
@@ -512,8 +512,8 @@ public final class DeckDetailViewModel {
                        COUNT(r.id) AS review_count,
                        SUM(CASE WHEN r.grade = ? THEN 1 ELSE 0 END) AS again_count
                   FROM card c
-                  LEFT JOIN term tf ON tf.id = c.front_term_id
-                  LEFT JOIN term tb ON tb.id = c.back_term_id
+                  LEFT JOIN dict.term tf ON tf.id = c.front_term_id
+                  LEFT JOIN dict.term tb ON tb.id = c.back_term_id
                   JOIN review_log r ON r.card_id = c.id
                  WHERE c.deck_id = ?
                  GROUP BY c.id
@@ -549,7 +549,7 @@ public final class DeckDetailViewModel {
     private nonisolated static func termSurfaces(db: Database, termIds: [Int64]) throws -> [String] {
         guard !termIds.isEmpty else { return [] }
         let surfacesById = try termIds.reduce(into: [Int64: String]()) { result, termId in
-            if let surface = try String.fetchOne(db, sql: "SELECT surface FROM term WHERE id = ?", arguments: [termId]) {
+            if let surface = try String.fetchOne(db, sql: "SELECT surface FROM dict.term WHERE id = ?", arguments: [termId]) {
                 result[termId] = surface
             }
         }
